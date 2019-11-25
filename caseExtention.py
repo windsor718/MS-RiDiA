@@ -167,7 +167,7 @@ def make_vars(modeldir, expname, rnofdir, simrange, eNum,
 
 
 # multiprocessing; post-processing functions
-def update_states(xa_each, mapdir, nlon, nlat, nt, eNum,
+def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, eNum,
                   nlfp, dtype_f=np.float32):
     """
     update parameters from assimilated state vectors
@@ -189,6 +189,10 @@ def update_states(xa_each, mapdir, nlon, nlat, nt, eNum,
     save_update(xa_each, outdir, nlon, nlat, nt, dtype_f)
     rewrite_restart(outdir, mapdir, nlon, nlat, nt, nlfp,
                     dtype_f=np.float32)
+    # write new rivbta.bin based on new rivshp.bin
+    crivshp = os.path.join(outdir, "rivshp.bin")
+    crivbta = os.path.join(outdir, "rivbta.bin")
+    subprocess.check_call("./fsrc/calc_rivbta", crivshp, crivbta, nlon, nlat)
 
 
 def rewrite_restart(outdir, mapdir, nlon, nlat, nt,
