@@ -252,51 +252,6 @@ def rewrite_restart(outdir, mapdir, nlon, nlat, nt,
                                         )
 
 
-def get_storage_invertsely(outwth, rivwth, rivlen, rivhgt,
-                           nvec, rivshp, grarea, fldgrd,
-                           nlfp=10, undef=-9999):
-    # Cython implementation later
-    storage = np.zeros([2, nvec])
-    for iv in range(0, nvec):
-        if rivhgt[iv] == undef:
-            continue
-        if outwth[iv] < rivwth[iv]:
-            # inbank
-            s = rivshp[iv]
-            wflw = outwth[iv]
-            hflw = rivhgt[iv]*(wflw/rivwth[iv])**(1/s)
-            Ariv = wflw*hflw*(1-(1/(s+1)))
-            Aflp = 0
-        else:
-            # outbank
-            wflw = rivwth[iv]
-            hflw = rivhgt[iv]
-            s = rivshp[iv]
-            Ariv = wflw * hflw * (1-(1/(s+1)))
-
-            wflp = outwth[iv]
-            wthpre = 0
-            dphpre = 0
-            layer = 0
-            wthinc = grarea[iv]*rivlen[iv]**(-1.)*nlfp**(-1)
-            while wthpre < wflp:
-                wthpre += wthinc
-                dphpre += fldgrd[layer, iv]*wthinc
-                layer += 1
-                if layer == nlfp:
-                    break
-            if layer == nlfp:
-                # flow is over cell, assimilation may not be good in this grid.
-                # leave it as it was or make it fldstomax.
-                continue
-            else:
-                hflp = dphpre + (wflp-wthpre)*fldgrd[layer, iv]
-            Aflp = (wflp + wflw) * hflp / 2.
-        storage[0, iv] = rivlen[iv] * Ariv
-        storage[1, iv] = rivlen[iv] * Aflp
-    return storage
-
-
 def save_updates(xa_each, outdir, nlon, nlat, nt, dtype_f):
     """
     save analysis onto file in outdir.
