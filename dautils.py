@@ -1,11 +1,17 @@
 import numpy as np
 import h5py
 
+"""
+sets of functions frequently used in the pyletkf context.
+may be included in pyletkf package in future release.
+"""
+
 
 def load_data3d(dpath, nt, nlat, nlon,
                 dtype=np.float32, memmap=True):
     """
     load binary datasets from dpath [nt, nlat, nlon]
+
     Args:
         dpath (str): path to data
         nt (int): first dimension value
@@ -44,9 +50,11 @@ def load_data3d(dpath, nt, nlat, nlon,
 def define_state_vector(keys, datapaths):
     """
     Define what will be included as a state vector
+
     Args:
         keys (list): state vector variable names.
         datapaths (str): path to that variable file.
+
     Returns:
         dict: state vector description dictionary
     """
@@ -59,10 +67,12 @@ def define_state_vector(keys, datapaths):
 def get_logn_perturbation(mean, std, eTot):
     """
     returns sampled values fron lognormal dist.
+
     Args:
         mean (float): mean of underlying normal distribution
         std (float): std of underlying normal distribution
         eTot (float): number of ensemble members
+
     Returns:
         ndarray: [eTot,] sampled values
     """
@@ -73,10 +83,12 @@ def get_logn_perturbation(mean, std, eTot):
 def get_unifm_perturbation(self, low, high, eTot):
     """
     returns sampled values fron lognormal dist.
+
     Args:
         low (float): lowest value
         high (float): highest value
         eTot (float): number of ensemble members
+
     Returns:
         ndarray: [eTot,] sampled values
     """
@@ -87,10 +99,12 @@ def get_unifm_perturbation(self, low, high, eTot):
 def get_normal_perturbation(mean, std, eTot):
     """
     returns sampled values fron lognormal dist.
+
     Args:
         mean (float): mean of underlying normal distribution
         std (float): std of underlying normal distribution
         eTot (float): number of ensemble members
+
     Returns:
         ndarray: [eTot,] sampled values
     """
@@ -101,10 +115,13 @@ def get_normal_perturbation(mean, std, eTot):
 def load_cached_patches(cachepath):
     """
     load pre-cached local patches in hdf5 format.
+
     Args:
         cachepath (str): path to the cached hdf5 file
+
     Returns:
         list: local patches vectorized
+
     Notes:
         this pre-cache process is implemented in pyletkf/exTools.py.
         exTools.constLocalPatches_nextxy() is tailored for CaMa.
@@ -118,9 +135,11 @@ def load_cached_patches(cachepath):
 def vectorize_2dIndex(nlon, nlat):
     """
     Vectorize 2d map index (lon/lat) into 1d vector array
+
     Args:
         nlon (int): number of longitudinal grid cells
         nlat (int): number of latitudinal grid cells
+
     Returns:
         ndarray: 1d-2d mapper for longitude
         ndarray: 1d-2d mapper for latitude
@@ -133,10 +152,12 @@ def vectorize_2dIndex(nlon, nlat):
 def getvecid(ilon, ilat, nlon):
     """
     Returns vector index based on C style from 2d map coords.
+
     Args:
         ilon (int): longitudinal number
         ilat (int): latitudinal number
         nlon (int): number of longirtudinal grid cells
+
     Returns:
         int: index in 1d vectorized map at (ilat, ilon) in 2d map.
     """
@@ -146,10 +167,12 @@ def getvecid(ilon, ilat, nlon):
 def vec2map(array1d, nlon, nlat):
     """
     simply re-shape 1d vectorized array into 2d map.
+
     Args:
         array1d (np.ndarray): vectorized 1d array whose size is nlon*nlat
         nlon (int): number of longitudinal grid cells
         nlat (int): number of latitudinal grid cells
+
     Returns:
         np.ndarray: 2d array
     """

@@ -1,5 +1,4 @@
 import numpy as np
-import h5py
 import json
 import datetime
 import pytz
@@ -11,16 +10,32 @@ from pyletkf import exTool
 import caseExtention as ext
 import dautils as dau
 
+camaout_dtype = np.float32  # change if changed
 
 class AssimCama(object):
     """
-    CaMa data assimilation handler.
-    Small modification of gosh/src file is needed:
-     - sample gosh file: MSR_3min_wth_DA.sh
-     - you need to cache d2fldstomax and d2fldgrd.
-        - simply add following lines on cmf_ctrl_output_mod.F90
-        - you may comment out those lines after you cached
-          as these are time-independent.
+    CaMa-Flood [v395b] data assimilation handler.
+
+    Notes:
+        Small modification of gosh/src file is needed:
+            - sample gosh file: MSR_3min_wth_DA.sh
+            - you need to cache d2fldstomax and d2fldgrd in 2d map format.
+            - simply add following lines on cmf_ctrl_output_mod.F90
+            - you may comment out those lines after you cached
+              as these are time-independent.
+        This class should be almost-case-universal to avoid bugs.
+            - those case-specific functions is collected in
+              caseExtentions.py.
+            - If you change system model design (e.g., state variables)
+              please make sure to review the code, and edit for your case
+              if applicable.
+            - You may need to edit some class methods to match arguments in
+              your extentions, but those editions would be appearent and clean.
+        Watch out for byte precision when you save files to interect with CaMa.
+            - In this code, especially pyletkf, uses double precision
+                - np.float64, real*8
+            - In current version of CaMa-Flood, outputs are single precision.
+                - np.float32, real*4
 
     CodeFlow:
             register()  # register experiment information
@@ -48,17 +63,22 @@ class AssimCama(object):
         back to forwarding
     """
 
-    def register(self, configjson):
+
+    def register(self, configjson, initialize=True):
         """
         registering model information from json file.
+
         Args:
             configjson (str): path to config file in json format
+
         Returns:
             None
+
         Notes:
             rather than using safeconfigparser, json format is better
             in language-wize IO.
         """
+        # read and setup instance variables
         with open(configjson) as f:
             varDict = json.load(f)
         self.expname = str(varDict["expname"])
@@ -74,24 +94,83 @@ class AssimCama(object):
         self.south = float(varDict["south"])
         self.res = float(varDict["res"])
         self.rnofdir = str(varDict["rnofdir"])
-        self.assimdates = self.get_assimdates(self.assimdatesPath)
+        self.ensrnof = bool(varDict["ensrnof"])
         self.eTot = int(varDict["eTot"])
-        self.nCPUs = int(varDict["ncpus"])
-        cachepath = str(varDict["cachepath"])
-        if not os.path.exists(cachepath):
-            use_cache = False
-        self.patches = exTool.read_cache(cachepath)
+        self.nCPUs = int(varDict["nCPUs"])
         self.statevars = varDict(["statevals"])
         self.statetype = varDict(["statetype"])  # prognostic/parameter
         self.obsvars = varDict(["obsvars"])  # 1 if available 0 if not.
-        self.check_consistency()  # check data consistency to avoid mistakes.
         self.assimconfig = varDict["assimconfig"]
+        self.cachepath = str(varDict["cachepath"])
+        if not os.path.exists(self.cachepath):
+            use_cache = False
+        self.patches = exTool.read_cache(self.cachepath)
+        self.assimdates = self.get_assimdates(self.assimdatesPath)
+
+        # check data consistency to avoid mistakes.
+        self.check_consistency()
 
         # instanciate pyletkf
         self.dacore = pyletkf.LETKF_core(self.assimconfig,
                                          mode="vector", use_cache=use_cache)
         self.dacore.initialize()
 
+        # get perturbated state variables and save those in outdir
+        if initialize:
+            self.initialize()
+
+    # main higher-API to start simulation
+    def start(self, sdate, edate, spinup=False):
+        """
+        main driver to start experiment
+
+        Args:
+            sdate (datetime.datetime): start date, must be utc aware
+            edate (datetime.datetime): end date, must be utc aware
+            spinup (bool): True to spinup for a year
+        """
+
+        if spinup:
+            utc = pytz.utc
+            edate = datetime.datetime(sdate.year+1, 1, 1)
+            edate = utc.localize(edate)
+            self.spinup(sdate, edate, ensrnof=self.ensrnof)
+        date = sdate
+        nT = 0
+        while date < edate:
+            date, nT = self.driver(date, nT)
+
+    def restart(self, edate):
+        # read most rescent backup info
+        with open(os.path.join(self.outdir.format(0), "ntlog.txt"), "r") as f:
+            rescent_info = f.readlines()[-1].split(",")
+        date = datetime.datetime.strptime(rescent_info[0], "%Y%m%d%H")
+        nT = int(rescent_info[1])
+        # copy backup restart files
+        resfile = "restart_{0}.bin".format(date.strftime("%Y%m%d%H"))
+        for eNum in range(self.eTot):
+            outdir = self.outdir.format(eNum)
+            respath = os.path.join(outdir, "restart", resfile)
+            outpath = os.path.join(outdir, "restart.bin")
+            subprocess.check_call("cp", respath, outpath)
+        # restart simulation
+        while date < edate:
+            date, nT = self.driver(date, nT)
+
+    def driver(self, date, nT):
+        ndate, nT = self.forward(date, nT,
+                                 ensrnof=self.ensrnof, restart=True)
+        self.filtering(date, nT)
+        if ndate.year > date.year:
+            self.backup_restart(ndate)
+            with open(os.path.join(self.outdir, "ntlog.txt"), "a") as f:
+                f.write("{0}, {1}"
+                        .format(ndate.strftime("%Y%m%d%H"), nT))
+        return ndate, nT
+
+
+
+    # utilities
     def check_consistency(self):
         """
         checking data shapes to avoid mistakenly use data from
@@ -108,12 +187,15 @@ class AssimCama(object):
         """
         Based on the dates observation available,
         returns the simulation date range.
+
         Args:
             date (datetime.datetime): current date (simulation starts from)
                                       must be utc aware object
             assimdates (list): datetime.datetime objects, in utc posix form
+
         Returns:
             tuple: [start, end], datetime.datetime objects
+
         Notes:
             Make every datetime object aware for a timezone.
             Here datetime is always treated as UTC, which is the safest way.
@@ -131,6 +213,7 @@ class AssimCama(object):
         """
         read assimilation date information
         (when observation is available)
+
         Notes:
             format of file of assimdatePath:
               %Y%m%d
@@ -138,23 +221,55 @@ class AssimCama(object):
               19840102
                 ...
             dates should be in UTC.
+
         Flags:
             may be deprecated and use xarray with ncdf instead
         """
+        utc = pytz.utc
         with open(assimdatesPath, "r") as f:
             lines = f.read_lines()
-            dates = [datetime.datetime.strptime(lines[0], l)
+            dates = [utc.localize(datetime.datetime.strptime(lines[0], l))
                      for l in lines[1::]]
         return dates
 
+    def initialize(self):
+        """
+        Initialize parameters in state variables.
+        Initial parameters will saved in self.outdir.
+        In case of reuses, the same file is also save at self.outdir/init/.
+        Once you call and create initial files, you may skip this.
+
+        Notes:
+            To tweak behavior of a perturbation, edit caseExtention.py
+        """
+        for idx, var in enumerate(self.statevars):
+            if self.statetype[idx] == "prognostic":
+                continue
+            elif self.statetype[idx] == "parameter":
+                outarray = ext.gain_perturbation(var)
+                for e in range(self.eTot):
+                    odir = self.outdir.format(e)
+                    bkupdir = os.path.join(odir, "init")
+                    fn = "{0}.bin".format(var)
+                    sf = outarray[e].flatten.astype(camaout_dtype)
+                    sf.tofile(os.path.join(odir, fn))
+                    sf.tofile(os.path.join(bkupdir, fn))
+            else:
+                raise IndexError("type %s is " +
+                                 "not defined".format(self.statetype[idx]))
+    #
+
+    # spinup functions
     def spinup(self, sdate, edate, ensrnof=False):
         """
         spiupping CaMa-Flood from zero storage.
+
         Args:
             sdate (datetime.datetime): spinup starts from this date
             edate (datetime.datetime): spinup ends at this date
             ensrnof (bool): True if you use ensemble runoff and need
                             string interpolation for paths.
+
         Returns:
             NoneType
         """
@@ -171,17 +286,35 @@ class AssimCama(object):
                     ]
         p.map(run_CaMa_, argslist)
         p.close()
+        # backup spiup files
+        self.backup_restart(edate + datetime.timedelta(seconds=86400))
 
+    def backup_restart(self, date):
+        for eNum in range(self.eTot):
+            outdir = self.outdir.format(eNum)
+            resdir = os.path.join(outdir, "restart")
+            if not os.path.exists(resdir):
+                os.makedirs(resdir)
+            respath = os.path.join(outdir, "restart.bin")
+            datestring = date.strftime("%Y%m%d%H")
+            bpath = os.path.dir(resdir,
+                                "restart_{0}.bin".format(datestring))
+            subprocess.check_call(["cp", respath, bpath])
+    #
+
+    # forwarding functions
     def forward(self, date, nT, ensrnof=False, restart=True):
         """
         fowwarding a state until next observation is available.
+
         Args:
             date (datetime.datetime): current date in utc (aware object)
             ensrnof (bool): True if you use ensemble runoff and need
                         string interpolation for paths.
             restart (bool): True if restart from previous time restart file
                         This is usualy True, only pass False when you
-                        want to do initial spinups.
+                        want to start from zero storage for some reason.
+
         Returns:
             datetime.datetime: next initial date
         """
@@ -200,22 +333,24 @@ class AssimCama(object):
         p.close()
         ndate = simrange[1] + datetime.timedelta(seconds=86400)
         nT += (ndate-date).days()
-        print(date, ndate, nT)
-        return ndate
+        print(date, ndate, nT)  # check carefully
+        return ndate, nT
+    #
 
+    # filtering functions
     def filtering(self, date, nT):
         """
         LETKF at assmilation date
+
         Args:
             date (datetime.datetime): current date
             nT (int): number of time steps in output time
         """
         statevector = self.const_statevector(nT)
         obs, obserr = self.const_obs()
-        xa = self.dacore.letkf(statevector, obs, obserr, obsvars,
-                               nCPUs=1, smoother=False)
-        self.parse_analysis(xa)
-        self.update_states(xa)
+        xa = self.dacore.letkf(statevector, obs, obserr, self.obsvars,
+                               nCPUs=self.nCPUs, smoother=False)
+        self.update_states(xa, nT)
 
     def const_statevector(self, nT):
         # create buffer array, this is used for concatenating memmap objects.
@@ -236,6 +371,7 @@ class AssimCama(object):
     def const_obs(self, obs, date):
         """
         parse observation xarray and returns data at the date
+
         Args:
             obs (xarray.Dataset): observation dataset object
             date (datetime.datetime): date
@@ -246,33 +382,36 @@ class AssimCama(object):
         obs_date_errors = obs_date[1]
         return obs_date_values, obs_date_errors
 
-    # These are only called at the very first time of the experiments.
-    def initialize(self, date):
+    # postprocessing functions
+    def update_states(self, xa, nT, dtype_f=camaout_dtype):
         """
-        Initialize state variables.
-        Once you call and create initial files, you may skip this.
+        update current state based on assimilated results
+        by saving files in outdir. Make sure that dtype_f
+        is your model bytes. The saved files via this function
+        will be used in the next step in the model.
+        This is the most case-specific part in DA study.
+
+        Args:
+            xa (np.ndarray): analysis array [nvars, eTot, nT, nReach]
+            nT (int): time step passed, most rescent t
+            dtype_f (np.dtype): data type you want to save.
+                                chose this carefully-this should be
+                                your model byte precision.
         """
-        for idx, var in enumerate(self.statevars):
-            if self.statetype[idx] == "prognostic":
-                continue
-            elif self.statetype[idx] == "parameter":
-                outarray = ext.gain_perturbation(var)
-                for e in range(self.eTot):
-                    odir = self.outdir.format(e)
-                    bkupdir = os.path.join(odir, "init")
-                    fn = "{0}.bin".format(var)
-                    sf = outarray[e].flatten.astype(np.float32)
-                    sf.tofile(os.path.join(odir, fn))
-                    sf.tofile(os.path.join(bkupdir, fn))
-            else:
-                raise IndexError("type %s is " +
-                                 "not defined".format(self.statetype[idx]))
+        argsmap = [[xa[:, eNum, -1, :], self.outdir.format(eNum), self.mapdir,
+                   self.nlon, self.nlat, nT, eNum, self.nlfp, dtype_f]
+                   for eNum in range(self.eTot)]
+        p = Pool(self.nCPUs)
+        p.map(submit_update_states, argsmap)
+        p.close()
+    #
 
 
-# multiprocessing later
+# multiprocessing; forwarding functions
 def run_CaMa_(args):
     """
     simple wrapper of run_CaMa for an usage in multiprocessing.
+
     Args:
         args (list): arguments passed to run_CaMa
     Returns:
@@ -286,6 +425,7 @@ def run_CaMa(camagosh, modeldir, expname, rnofdir, simrange, eNum,
              ensrnof=False, restart=True):
     """
     execute cama-flood with in-code generated variable declaration
+
     Args:
         camagosh (str): path to the gosh file
         odeldir (str): model directory
@@ -301,58 +441,17 @@ def run_CaMa(camagosh, modeldir, expname, rnofdir, simrange, eNum,
     Returns:
         NoneType
     """
-    varspath = make_vars(modeldir, expname, rnofdir, simrange, eNum,
-                         ensrnof=ensrnof, restart=restart)
+    varspath = ext.make_vars(modeldir, expname, rnofdir, simrange, eNum,
+                             ensrnof=ensrnof, restart=restart)
     subprocess.check_call([camagosh, varspath])
+#
 
 
-def make_vars(modeldir, expname, rnofdir, simrange, eNum,
-              ensrnof=False, restart=True):
+# multiprocessing; postprocessing functions
+def submit_update_states(args):
     """
-    generate vars.txt to load variables in CaMa gosh.
-    Args:
-        modeldir (str): model directory
-        expname (str): experiment name
-        rnofdir (str): rnof directory
-        simrange (list): one batch sim. start/end date
-        eNum (int): ensemble member id
-        ensrnof (bool): True if you use ensemble runoff and need
-                        string interpolation for paths.
-        restart (bool): True if restart from previous time restart file
-                        This is usualy True, only pass False when you
-                        want to do initial spinups.
-    Returns:
-        str: path to the vars_${eNum}.txt
+    a wrapper to expand args.
     """
-    base = modeldir
-    exp = expname
-    rdir = os.path.join(base, "out/{0}/{1:03d}".format(exp, eNum))
-    ysta = simrange[0].year
-    smon = simrange[0].month
-    sday = simrange[0].day
-    yend = simrange[1].year
-    emon = simrange[1].month
-    eday = simrange[1].day
-    if ensrnof:
-        crofdir = rnofdir % eNum
-    else:
-        crofdir = rnofdir
-    if restart:
-        spinup = 0
-    else:
-        spinup = 1
-    crivhgt = os.path.join(rdir, "rivhgt.bin")
-    crivman = os.path.join(rdir, "rivman.bin")
-    crivshp = os.path.join(rdir, "rivshp.bin")
-    crivbta = os.path.join(rdir, "rivbta.bin")
-    namelist = ["BASE", "EXP", "RDIR", "YSTA", "SMON", "SDAY", "SPINUP"
-                "YEND", "EMON", "EDAY", "CROFDIR", "CRIVHGT",
-                "CRIVMAN", "CRIVSHP", "CRIVBTA"]
-    varlist = [base, exp, rdir, ysta, smon, sday, spinup,
-               yend, emon, eday, crofdir, crivhgt,
-               crivman, crivshp, crivbta]
-    outpath = os.path.join(rdir, "vars_{0:02d}".format(eNum))
-    with open(outpath) as f:
-        for name, var in zip(namelist, varlist):
-            f.write("{0}={1}\n".format(name, var))
-    return outpath
+    ext.update_states(args[0], args[1], args[2], args[3],
+                      args[4], args[5], args[6], args[7],
+                      args[8])
