@@ -76,7 +76,7 @@ program calc_rivwth
       call getarg(1,buf)
        if( buf/='' ) read(buf,*) crivshp
       call getarg(2,buf)
-       if( buf/='' ) read(buf,'(a128)') crivbta
+       if( buf/='' ) read(buf,*) crivbta
 
       call getarg(3,buf)
        if( buf/='' ) read(buf,*) cnextxy
