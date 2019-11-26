@@ -1,4 +1,4 @@
-program calc_rivwth
+program calc_rivbta
 ! ================================================
       implicit none
 ! ===================
@@ -126,4 +126,4 @@ program calc_rivwth
 
 !!================================================
 
-end program calc_rivwth
+end program calc_rivbta
