@@ -12,6 +12,7 @@ import dautils as dau
 
 camaout_dtype = np.float32  # change if changed
 
+
 class AssimCama(object):
     """
     CaMa-Flood [v395b] data assimilation handler.
@@ -63,7 +64,6 @@ class AssimCama(object):
         back to forwarding
     """
 
-
     def register(self, configjson, initialize=True):
         """
         registering model information from json file.
@@ -87,7 +87,6 @@ class AssimCama(object):
                                    self.expname, "{0:02d}")
         self.nlon = int(varDict["nlon"])
         self.nlat = int(varDict["nlat"])
-        self.nvec = self.nlon * self.nlat
         self.mapdir = str(varDict["mapdir"])
         self.assimdatesPath = str(varDict["assimdatesPath"])
         self.west = float(varDict["west"])
@@ -97,7 +96,7 @@ class AssimCama(object):
         self.ensrnof = bool(varDict["ensrnof"])
         self.eTot = int(varDict["eTot"])
         self.nCPUs = int(varDict["nCPUs"])
-        self.statevars = varDict(["statevals"])
+        self.statevars = varDict(["statevars"])
         self.statetype = varDict(["statetype"])  # prognostic/parameter
         self.obsvars = varDict(["obsvars"])  # 1 if available 0 if not.
         self.assimconfig = varDict["assimconfig"]
@@ -106,7 +105,7 @@ class AssimCama(object):
             use_cache = False
         self.patches = exTool.read_cache(self.cachepath)
         self.assimdates = self.get_assimdates(self.assimdatesPath)
-
+        self.nvec = len(vec2lat)
         # check data consistency to avoid mistakes.
         self.check_consistency()
 

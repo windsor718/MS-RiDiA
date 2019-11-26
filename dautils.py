@@ -157,7 +157,7 @@ def vectorize_2dIndex(domainarr):
     return camavec.make_vectorizedIndex(domainarr)
 
 
-def getvecid(ilon, ilat, map2vec):
+def getvecid(ilat, ilon, map2vec):
     """
     Returns vector index based on C style from 2d map coords.
 
