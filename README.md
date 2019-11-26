@@ -13,7 +13,7 @@ Expensive parts of those code sets are written in fortran and Cython (fully stat
 and most of IO part is lazy-loading using numpy memory mapping. Global Ready.  
   
 ## Code structure:  
-- pyletkf: python/Cython implementation of LETKF.
+- [pyletkf](https://github.com/windsor718/pyletkf): python/Cython implementation of LETKF.
 - assim_cama.py: main interface for data assimilation using CaMa-Flood. This can be re-used for any kind of data assimilation study using pyletkf.  
 - caseExtention.py: code collecting functions havily dependent on each experiment setting. Edit this file to make interface for your experiment.  
 - dautils.py: functions used frequently in pyletkf interection. Maybe be included in pyletkf in future updates.  
