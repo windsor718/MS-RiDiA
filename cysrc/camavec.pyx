@@ -110,6 +110,9 @@ def vectorize_map2d(my_type[:, :] inputmap,
 #@cython.wraparound(False)
 def vectorize_map3d(my_type[:, :, :] inputmap,
                     np.int32_t[:, :] map2vec, int nvec):
+    """
+    wrapper for 3d data (2d map with multiple layers)
+    """
     cdef int i
     cdef int nvar = inputmap.shape[0]
     if my_type == np.int32_t:
@@ -123,3 +126,58 @@ def vectorize_map3d(my_type[:, :, :] inputmap,
         vec_view[i] = vectorize_map2d(inputmap[i], map2vec, nvec)
     
     return vec
+
+
+#@cython.boundscheck(False)
+#@cython.wraparound(False)
+def revert_grid(my_type[:] inputvector,
+                np.int32_t[:] vec2lat,
+                np.int32_t[:] vec2lon,
+                int nlat, int nlon):
+    """
+    revert vector to grid based on pre-calculated
+    vec2lat and vec2lon array.
+    """
+    cdef int iv
+    cdef int nvec = vec2lat.shape[0]
+    cdef np.int32_t ilat
+    cdef np.int32_t ilon
+
+    if my_type == np.int32_t:
+        DTYPE = np.int32
+    elif my_type == float:
+        DTYPE = np.float32
+    mapgrid = np.zeros([nlat, nlon], dtype=DTYPE)
+    cdef my_type [:, :] mapgrid_view = mapgrid
+
+    for iv in prange(nvec, nogil=True):
+        ilat = vec2lat[iv]
+        ilon = vec2lon[iv]
+        mapgrid_view[ilat, ilon] = inputvector[iv]
+    return mapgrid
+
+
+#@cython.boundscheck(False)
+#@cython.wraparound(False)
+def revert_layers_grid(my_type[:, :] inputvector,
+                       np.int32_t[:] vec2lat,
+                       np.int32_t[:] vec2lon,
+                       int nlat, int nlon):
+    """
+    wrapper to handle 1d vector with multiple layers
+    """
+    cdef int il
+    cdef int nvec = vec2lat.shape[0]
+    cdef int nlayer = inputvector.shape[0]
+
+    if my_type == np.int32_t:
+        DTYPE = np.int32
+    elif my_type == float:
+        DTYPE = np.float32
+    mapgrid = np.zeros([nlayer, nlat, nlon], dtype=DTYPE)
+    cdef my_type [:, :, :] mapgrid_view = mapgrid
+
+    for il in range(nlayer):
+        mapgrid_view[il] = revert_grid(inputvector[il], vec2lat, vec2lon,
+                                  nlat, nlon)
+    return mapgrid
