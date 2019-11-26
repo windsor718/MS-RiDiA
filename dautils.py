@@ -1,6 +1,6 @@
 import numpy as np
 import h5py
-from cysrc import camavec
+import camavec
 
 """
 sets of functions frequently used in the pyletkf context.
