@@ -1,4 +1,4 @@
-# River Discharge reAnalysis using historical optical satellite images from Landsat  
+# River Discharge reAnalysis via optical satellite images from Landsat  
 ## Missouri Case  
 This is a repo. for a study of:  
 **River Discharge reAnalysis using historical optical satellite images from Landsat from 1984.**  
