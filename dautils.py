@@ -1,5 +1,6 @@
 import numpy as np
 import h5py
+from cysrc import camavec
 
 """
 sets of functions frequently used in the pyletkf context.
@@ -132,24 +133,31 @@ def load_cached_patches(cachepath):
     return patches
 
 
-def vectorize_2dIndex(nlon, nlat):
+def vectorize_2dIndex(domainarr):
     """
     Vectorize 2d map index (lon/lat) into 1d vector array
 
     Args:
-        nlon (int): number of longitudinal grid cells
-        nlat (int): number of latitudinal grid cells
+        domainarr (np.ndarray): domain 2d map [nlat, nlon]
+                               positive for calculation domain,
+                               negative for non-calculation domain.
+                               negative area will not be included in vectors.
 
     Returns:
-        ndarray: 1d-2d mapper for longitude
+        ndarray: 2d-1d mapper to vectorize
         ndarray: 1d-2d mapper for latitude
+        ndarray: 1d-2d mapper for longitude
+
+    Notes:
+        as long as your basinarr is positive at your calculation domain
+        and negative at your non-calculation domain (e.g., ocean in river
+        routing model), the function returns vectorization information
+        only for your calculation domain by removing non-calc. ones.
     """
-    veclon = np.tile(np.arange(0, nlon), nlat)
-    veclat = np.repeat(np.arange(0, nlat), nlon)
-    return veclon, veclat
+    return camavec.make_vectorizedIndex(domainarr)
 
 
-def getvecid(ilon, ilat, nlon):
+def getvecid(ilon, ilat, map2vec):
     """
     Returns vector index based on C style from 2d map coords.
 
@@ -161,19 +169,50 @@ def getvecid(ilon, ilat, nlon):
     Returns:
         int: index in 1d vectorized map at (ilat, ilon) in 2d map.
     """
-    return ilat*nlon + ilon
+    return map2vec[ilat, ilon]
 
 
-def vec2map(array1d, nlon, nlat):
+def vectorize_map(map3d, map2vec, nvec):
     """
-    simply re-shape 1d vectorized array into 2d map.
+    Returns vectorized 2dmap
 
     Args:
-        array1d (np.ndarray): vectorized 1d array whose size is nlon*nlat
+        map3d (np.ndarray): input 2d map with layers [nlayers, nlat, nlon]
+        map2vec (np.ndarray): 2d-1d mapper
+        nvec (int): length of whole vector (len(vec2lat))
+    """
+    DTYPE = map3d.dtype
+    if DTYPE == np.float32:
+        outvector = camavec.vectorize_map3d_float32(map3d, map2vec, nvec)
+    elif DTYPE == np.int32:
+        outvector = camavec.vectorize_map3d_int32(map3d, map2vec, nvec)
+    else:
+        TypeError("type {0} is not supported".format(DTYPE))
+    return outvector
+
+
+def revert_map(vec2d, vec2lat, vec2lon, nlon, nlat):
+    """
+    get 2d map with layers (3d) from 1d vector with layers (2d).
+
+    Args:
+        vec2d (np.ndarray): vectorized 1d array with layers
+                            [nlayers, nvec]
+        vec2lat (np.ndarray): 1d-2d mapper for latitude
+        vec2lon (np.ndarray): 1d-2d mapper for longitude
         nlon (int): number of longitudinal grid cells
         nlat (int): number of latitudinal grid cells
 
     Returns:
-        np.ndarray: 2d array
+        np.ndarray: []
     """
-    return array1d.reshape(nlat, nlon)
+    DTYPE = vec2d.dtype
+    if DTYPE == np.float32:
+        outmap = camavec.revert_layers_grid_float32(vec2d, vec2lat, vec2lon,
+                                                    nlat, nlon)
+    elif DTYPE == np.int32:
+        outmap = camavec.revert_layers_grid_int32(vec2d, vec2lat, vec2lon,
+                                                  nlat, nlon)
+    else:
+        TypeError("type {0} is not supported".format(DTYPE))
+    return outmap

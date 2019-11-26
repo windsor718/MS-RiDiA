@@ -12,33 +12,36 @@ cdef np.float32_t undef_float = 1e+20
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def make_vectorizeIndex(const np.int32_t[:,:] basin):
+def make_vectorizedIndex(const np.int32_t[:,:] domain):
     """
-    Based on array-like object from basin.bin in CaMa-Flood,
-    make make vector indices and conversion matrix.
-    
+    Based on array-like object, domain, make vector indices
+    and convertion matrix. domain should contain any positive values 
+    in the cell where you want to include in vectors, and negatives for
+    those you do not want to.
+
     Args:
-        basin (np.ndarray): basin ids
+        domain (np.ndarray): domain info
 
     Returns:
 
     Notes:
-        This function does not use nextxy.bin to make vector,
-        which is the case in MAP2VEC subroutine in CaMa-Flood.
-        DO NOT use this resultant to convert vector data from
-        CaMa-Flood to a 2dmap. This is only for an closed usage
-        in pyletkf context only.
+        For CaMa-Flood Users:
+          This function does not use nextxy.bin to make vector,
+          which is the case in MAP2VEC subroutine in CaMa-Flood.
+          DO NOT use this resultant to convert vector data from
+          CaMa-Flood to a 2dmap. This is only for an closed usage
+          in pyletkf context only.
     """
 
-    cdef int nlat = basin.shape[0]
-    cdef int nlon = basin.shape[1]
+    cdef int nlat = domain.shape[0]
+    cdef int nlon = domain.shape[1]
     cdef int bid
     cdef int vecid = 0
     map2vec = np.zeros([nlat, nlon], dtype=np.int32)
     cdef np.int32_t [:, :] map2vec_view = map2vec
     for ilat in range(nlat):
         for ilon in range(nlon):
-            bid = basin[ilat, ilon]
+            bid = domain[ilat, ilon]
             if bid < 0:
                 map2vec_view[ilat, ilon] = undef_int
             else:
@@ -53,7 +56,7 @@ def make_vectorizeIndex(const np.int32_t[:,:] basin):
     vecid = 0
     for ilat in range(nlat):
         for ilon in range(nlon):
-            bid = basin[ilat, ilon]
+            bid = domain[ilat, ilon]
             if bid < 0:
                 # ocean
                 continue
@@ -130,8 +133,8 @@ def vectorize_map2d_float32(const np.float32_t[:, :] inputmap,
     return vec
 
 
-#@cython.boundscheck(False)
-#@cython.wraparound(False)
+@cython.boundscheck(False)
+@cython.wraparound(False)
 def vectorize_map3d_int32(const np.int32_t [:, :, :] inputmap,
                           np.int32_t[:, :] map2vec, int nvec):
     """
