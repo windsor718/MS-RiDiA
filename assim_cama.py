@@ -1,6 +1,8 @@
 import numpy as np
 import json
 import datetime
+import h5py
+import xarray as xr
 import pytz
 import subprocess
 import os
@@ -105,7 +107,18 @@ class AssimCama(object):
             use_cache = False
         self.patches = exTool.read_cache(self.cachepath)
         self.assimdates = self.get_assimdates(self.assimdatesPath)
-        self.nvec = len(vec2lat)
+        vecmappath = str(self.varDict["vecmappath"])  # map_width.ipynb
+        if os.path.exists(vecmappath):
+            with h5py.File(vecmappath, "r") as f:
+                self.map2vec = f["map2vec"][:]
+                self.vec2lat = f["vec2lat"][:]
+                self.vec2lon = f["vec2lon"][:]
+                self.nvec = len(self.vec2lat)
+        else:
+            raise IOError("{0} does not exist. You may create this from "
+                          "dautils.make_vectorized2dIndex, but make sure "
+                          "to match with your observation data label.")
+
         # check data consistency to avoid mistakes.
         self.check_consistency()
 
@@ -166,8 +179,7 @@ class AssimCama(object):
                 f.write("{0}, {1}"
                         .format(ndate.strftime("%Y%m%d%H"), nT))
         return ndate, nT
-
-
+    #
 
     # utilities
     def check_consistency(self):
@@ -208,27 +220,33 @@ class AssimCama(object):
         nextAssimDate = [dd for dd in assimdates if date < dd][0]
         return [date, nextAssimDate]
 
-    def get_assimdates(self, assimdatesPath):
+    def read_observation(self, ncpath):
+        """
+        read observaiton netcdf. See data/MS-RiDiA/src/map_widths.ipynb
+        to create this.
+
+        Args:
+            ncpath (str): netcdf path
+
+        Returns:
+            xarray.Dataset
+        """
+        return xr.open_dataset(ncpath)
+
+    def get_assimdates(self, obsdset):
         """
         read assimilation date information
         (when observation is available)
 
-        Notes:
-            format of file of assimdatePath:
-              %Y%m%d
-              19840101
-              19840102
-                ...
-            dates should be in UTC.
+        Args:
+            obsdset (xr.Dataset): observation dataset
 
-        Flags:
-            may be deprecated and use xarray with ncdf instead
+        Returns:
+            list
         """
         utc = pytz.utc
-        with open(assimdatesPath, "r") as f:
-            lines = f.read_lines()
-            dates = [utc.localize(datetime.datetime.strptime(lines[0], l))
-                     for l in lines[1::]]
+        dates = obsdset["time"].tolist()
+        dates = [utc.localize(date) for date in dates]
         return dates
 
     def initialize(self):
@@ -375,10 +393,18 @@ class AssimCama(object):
             obs (xarray.Dataset): observation dataset object
             date (datetime.datetime): date
         """
-        obs_date = obs.sel(time=date).to_array().values()
-        print(obs_date.shape)
-        obs_date_values = obs_date[0]
-        obs_date_errors = obs_date[1]
+        obs_values_all = []
+        obs_errors_all = []
+        for obsvar in self.obsvars:
+            obs = obs[obsvar].sel(time=date,
+                                  kind="values").values()
+            obs_values_all.append(obs.reshape(1, -1))
+            err = obs[obsvar].sel(time=date,
+                                  kind="errors").values()
+            obs_errors_all.append(err.reshape(1, -1))
+        obs_date_values = np.vstack(obs_values_all)
+        obs_date_errors = np.vstacl(obs_errors_all)
+        print(obs_date_values.shape)
         return obs_date_values, obs_date_errors
 
     # postprocessing functions
