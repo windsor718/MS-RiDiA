@@ -8,6 +8,7 @@ import subprocess
 import os
 from multiprocessing import Pool
 from pyletkf.pyletkf import pyletkf
+from pyletkf.pyletkf import exTool
 import caseExtention as ext
 import dautils as dau
 
@@ -65,7 +66,7 @@ class AssimCama(object):
         back to forwarding
     """
 
-    def register(self, configjson, initialize=True):
+    def register(self, configjson, initialize=True, use_cached_lp=False):
         """
         registering model information from json file.
 
@@ -90,7 +91,6 @@ class AssimCama(object):
         self.nlon = int(varDict["nlon"])
         self.nlat = int(varDict["nlat"])
         self.mapdir = str(varDict["mapdir"])
-        self.assimdatesPath = str(varDict["assimdatesPath"])
         self.west = float(varDict["west"])
         self.south = float(varDict["south"])
         self.res = float(varDict["res"])
@@ -98,16 +98,16 @@ class AssimCama(object):
         self.ensrnof = bool(varDict["ensrnof"])
         self.eTot = int(varDict["eTot"])
         self.nCPUs = int(varDict["nCPUs"])
-        self.statevars = varDict(["statevars"])
-        self.statetype = varDict(["statetype"])  # prognostic/parameter
-        self.obsvars = varDict(["obsvars"])  # 1 if available 0 if not.
+        self.statevars = varDict["statevars"]
+        self.statetype = varDict["statetype"]  # prognostic/parameter
+        self.obsvars = varDict["obsvars"]  # 1 if available 0 if not.
+        self.obsncpath = varDict["obsncpath"]
         self.assimconfig = varDict["assimconfig"]
-        self.cachepath = str(varDict["cachepath"])
-        if not os.path.exists(self.cachepath):
-            use_cache = False
-        self.patches = exTool.read_cache(self.cachepath)
-        self.assimdates = self.get_assimdates(self.assimdatesPath)
-        vecmappath = str(self.varDict["vecmappath"])  # map_width.ipynb
+
+        # read observations
+        self.obs_dset = self.read_observation(self.obsncpath)
+        self.assimdates = self.get_assimdates(self.obs_dset)
+        vecmappath = str(varDict["vecmappath"])  # map_width.ipynb
         if os.path.exists(vecmappath):
             with h5py.File(vecmappath, "r") as f:
                 self.map2vec = f["map2vec"][:]
@@ -119,13 +119,13 @@ class AssimCama(object):
                           "dautils.make_vectorized2dIndex, but make sure "
                           "to match with your observation data label.")
 
-        # check data consistency to avoid mistakes.
-        self.check_consistency()
-
         # instanciate pyletkf; if local patch is not cached, it will be generated.
         self.dacore = pyletkf.LETKF_core(self.assimconfig,
-                                         mode="vector", use_cache=use_cache)
+                                         mode="vector", use_cache=use_cached_lp)
         self.dacore.initialize()
+
+        # check data consistency to avoid mistakes.
+        self.check_consistency()
 
         # get perturbated state variables and save those in outdir
         if initialize:
@@ -141,7 +141,6 @@ class AssimCama(object):
             edate (datetime.datetime): end date, must be utc aware
             spinup (bool): True to spinup for a year
         """
-
         if spinup:
             utc = pytz.utc
             edate = datetime.datetime(sdate.year+1, 1, 1)
@@ -150,7 +149,7 @@ class AssimCama(object):
         date = sdate
         nT = 0
         while date < edate:
-            date, nT = self.driver(date, nT)
+            date, nT = self.driver(date, nT, self.obs_dset)
 
     def restart(self, edate):
         # read most rescent backup info
@@ -169,10 +168,10 @@ class AssimCama(object):
         while date < edate:
             date, nT = self.driver(date, nT)
 
-    def driver(self, date, nT):
+    def driver(self, date, nT, obs_dset):
         ndate, nT = self.forward(date, nT,
                                  ensrnof=self.ensrnof, restart=True)
-        self.filtering(date, nT)
+        self.filtering(date, nT, obs_dset)
         if ndate.year > date.year:
             self.backup_restart(ndate)
             with open(os.path.join(self.outdir, "ntlog.txt"), "a") as f:
@@ -188,10 +187,10 @@ class AssimCama(object):
         unintentional source.
         """
         print("checking data consistency:")
-        nvec = self.nlon * self.nlat
+        nvec = len(self.vec2lat)
         print("checking local patch loaded...")
-        assert len(self.patches) == nvec, "cached local patch size" +\
-                                          "does not match with nlat/nlon."
+        assert len(self.dacore.patches) == nvec, "cached local patch size" +\
+                                           "does not match with vector size."
         print("ok.")
 
     def get_nextSimDates(self, date, assimdates):
@@ -245,8 +244,11 @@ class AssimCama(object):
             list
         """
         utc = pytz.utc
-        dates = obsdset["time"].tolist()
-        dates = [utc.localize(date) for date in dates]
+        dates = obsdset["time"].values
+        dtdates = [datetime.datetime.utcfromtimestamp(date/1e9) for date in
+                   dates.tolist()]  # dates.tolist() converts np.datetime64
+                                    # to posix timestamp
+        dates = [utc.localize(dtdate) for dtdate in dtdates]
         return dates
 
     def initialize(self):
@@ -355,7 +357,7 @@ class AssimCama(object):
     #
 
     # filtering functions
-    def filtering(self, date, nT):
+    def filtering(self, date, nT, obs):
         """
         LETKF at assmilation date
 
@@ -364,7 +366,7 @@ class AssimCama(object):
             nT (int): number of time steps in output time
         """
         statevector = self.const_statevector(nT)
-        obs, obserr = self.const_obs()
+        obs, obserr = self.const_obs(obs, date)
         xa = self.dacore.letkf(statevector, obs, obserr, self.obsvars,
                                nCPUs=self.nCPUs, smoother=False)
         self.update_states(xa, nT)
@@ -380,7 +382,8 @@ class AssimCama(object):
                 d = dau.load_data3d(os.path.join(self.outdir.format(eNum),
                                                  "{0}.bin".format(var)
                                                  ),
-                                    nT, self.nlat, self.nlon, dtype=np.float32
+                                    nT, self.nlat, self.nlon,
+                                    self.map2vec, self.nvec, dtype=np.float32
                                     )
                 buffer[idx, eNum, :, :] = d
         return buffer
@@ -424,7 +427,8 @@ class AssimCama(object):
                                 your model byte precision.
         """
         argsmap = [[xa[:, eNum, -1, :], self.outdir.format(eNum), self.mapdir,
-                   self.nlon, self.nlat, nT, eNum, self.nlfp, dtype_f]
+                   self.nlon, self.nlat, nT, self.map2vec, self.vec2lat,
+                   self.vec2lon, eNum, self.nlfp, dtype_f]
                    for eNum in range(self.eTot)]
         p = Pool(self.nCPUs)
         p.map(submit_update_states, argsmap)
@@ -479,4 +483,4 @@ def submit_update_states(args):
     """
     ext.update_states(args[0], args[1], args[2], args[3],
                       args[4], args[5], args[6], args[7],
-                      args[8])
+                      args[8], args[9], args[10], args[11])

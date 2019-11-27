@@ -20,14 +20,13 @@ Keeping those wrapper names/functions would make code integration easy/clean.
 
 caseCode = "MSR-width"
 svals = ["outwth", "rivman", "rivshp"]
-string = "This extention is desined for caseCode {0}.\n" +\
+string = "\nThis extention is desined for caseCode {0}.\n" +\
          "{0} assumes that state variables are:\n" +\
-         "\t{1}, {2}, {3}" +\
+         "\t{1}, {2}, {3}\n" +\
          "If your state variables are different from above,\n" +\
          "you may need to edit this file " +\
-         "and dependnt modules".format(caseCode, svals[0],
-                                       svals[1], svals[2])
-warnings.warn(string)
+         "and dependnt modules"
+warnings.warn(string.format(caseCode, svals[0], svals[1], svals[2]))
 
 
 # utilities-initialization functions
@@ -43,7 +42,7 @@ def gain_perturbation(var, refmappath, nlat, nlon, eTot, dtype_f=np.float32):
         nlon (int): number of longitudinal grid cells
         eTot (int): total number of ensemble members
         dtype_f (np.dtype): float data type you want to save;
-                            must be similar to model data type. 
+                            must be similar to model data type.
     """
     # read background prior information
     widthclass = pd.read_csv("./WidthsClass.csv", index_col=0)
@@ -83,7 +82,7 @@ def get_map2d_from_lognormal(widths2d, widthMed,
     for ilat in range(nlat):
         for ilon in range(nlon):
             width = widths2d[ilat, ilon]
-            if width = undef:
+            if width == undef:
                 outarray[:, ilat, ilon] = undef
                 continue
             idx = np.argmin(np.array(widthMed) - width)
@@ -167,8 +166,8 @@ def make_vars(modeldir, expname, rnofdir, simrange, eNum,
 
 
 # multiprocessing; post-processing functions
-def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, eNum,
-                  nlfp, dtype_f=np.float32):
+def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat,
+                  vec2lon, eNum, nlfp, dtype_f=np.float32):
     """
     update parameters from assimilated state vectors
 
@@ -186,8 +185,9 @@ def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, eNum,
     Returns:
         None
     """
-    save_update(xa_each, outdir, nlon, nlat, nt, dtype_f)
-    rewrite_restart(outdir, mapdir, nlon, nlat, nt, nlfp,
+    nvec = len(vec2lat)
+    save_update(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f)
+    rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, nvec, nlfp,
                     dtype_f=np.float32)
     # write new rivbta.bin based on new rivshp.bin
     crivshp = os.path.join(outdir, "rivshp.bin")
@@ -195,7 +195,7 @@ def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, eNum,
     subprocess.check_call("./fsrc/calc_rivbta", crivshp, crivbta, nlon, nlat)
 
 
-def rewrite_restart(outdir, mapdir, nlon, nlat, nt,
+def rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, nvec,
                     nlfp=10, dtype_f=np.float32):
     """
     re-write restart file (storage-only) to update initial condition
@@ -225,22 +225,23 @@ def rewrite_restart(outdir, mapdir, nlon, nlat, nt,
         passed.
     """
     # load data in vectorized format
-    rivwth = du.load_data3d(os.path.join(mapdir, "rivwth_gwdlr.bin"),
-                            1, nlat, nlon, dtype=np.float32)[0]
-    rivlen = du.load_data3d(os.path.join(mapdir, "rivlen.bin"),
-                            1, nlat, nlon, dtype=np.float32)[0]
-    rivhgt = du.load_data3d(os.path.join(mapdir, "rivhgt.bin"),
-                            1, nlat, nlon, dtype=np.float32)[0]
-    grarea = du.load_data3d(os.path.join(mapdir, "ctmare.bin"),
-                            1, nlat, nlon, dtype=np.float32)[0]
-    fldgrd = du.load_data3d(os.path.join(mapdir, "fldgrd.bin"),
-                            nlfp, nlat, nlon, dtype=np.float32)[:]
+    rivwth = dau.load_data3d(os.path.join(mapdir, "rivwth_gwdlr.bin"),
+                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+    rivlen = dau.load_data3d(os.path.join(mapdir, "rivlen.bin"),
+                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+    rivhgt = dau.load_data3d(os.path.join(mapdir, "rivhgt.bin"),
+                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+    grarea = dau.load_data3d(os.path.join(mapdir, "ctmare.bin"),
+                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+    fldgrd = dau.load_data3d(os.path.join(mapdir, "fldgrd.bin"),
+                            nlfp, nlat, nlon, map2vec, nvec,
+                            dtype=np.float32)[:]
     nvec = nlat*nlon
     # after assimilation file is saved
-    rivshp = du.load_data3d(os.path.join(outdir, "rivshp.bin"),
-                            1, nlat, nlon, dtype=np.float32)[0]
-    outwth = du.load_data3d(os.path.join(outdir, "outwth.bin"),
-                            nt, nlat, nlon, dtype=np.float32)[-1]
+    rivshp = dau.load_data3d(os.path.join(outdir, "rivshp.bin"),
+                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+    outwth = dau.load_data3d(os.path.join(outdir, "outwth.bin"),
+                            nt, nlat, nlon, map2vec, nvec, dtype=np.float32)[-1]
     storage = invert_storage(outwth, rivwth, rivlen, rivhgt,
                              nvec, rivshp, grarea, fldgrd,
                              nlfp=nlfp, undef=-9999)
@@ -252,7 +253,7 @@ def rewrite_restart(outdir, mapdir, nlon, nlat, nt,
                                         )
 
 
-def save_updates(xa_each, outdir, nlon, nlat, nt, dtype_f):
+def save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f):
     """
     save analysis onto file in outdir.
 
@@ -266,21 +267,22 @@ def save_updates(xa_each, outdir, nlon, nlat, nt, dtype_f):
         nt (int): number of time (first dimension) for sim. output files
         dtype_f (np object): data type for float in numpy object
     """
+    nvec = len(vec2lat)
     # update outwth
     data0 = np.memmap(os.path.join(outdir, "outwth.bin"), dtype=dtype_f,
                       shape=(nt, nlat, nlon), mode="w+")  # use carefully!
-    data0[-1] = dau.vec2map(xa_each[0, :].astype(dtype_f))
+    data0[-1] = dau.revert_map(xa_each[0, :].astype(dtype_f).reshape(1, nvec))
     del data0  # closing and flushing changes to disk
     data1 = np.memmap(os.path.join(outdir, "rivman.bin"), dtype=dtype_f,
                       shape=(nlat, nlon), mode="w+")  # use carefully!
-    data1 = dau.vec2map(xa_each[1, :].astype(dtype_f))
+    data1 = dau.revert_map(xa_each[1, :].astype(dtype_f).reshape(1, nvec))
     del data1
     data2 = np.memmap(os.path.join(outdir, "rivshp.bin"), dtype=dtype_f,
                       shape=(nlat, nlon), mode="w+")  # use carefully!
-    data2 = dau.vec2map(xa_each[2, :].astype(dtype_f))
+    data2 = dau.revert_map(xa_each[2, :].astype(dtype_f).reshape(1, nvec))
     del data2
     # temporally; test purpose
     data = np.fromfile(os.path.join(outdir, "rivman.bin"), dtype=dtype_f).reshape(nlat, nlon)
-    assert (data == dau.vec2map(xa_each[1, :].astype(dtype_f))), "not overwriten!"
+    assert (data == dau.revert_map(xa_each[1, :].astype(dtype_f).reshape(1, nvec))), "not overwriten!"
     #
 #

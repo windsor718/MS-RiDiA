@@ -8,7 +8,7 @@ may be included in pyletkf package in future release.
 """
 
 
-def load_data3d(dpath, nt, nlat, nlon,
+def load_data3d(dpath, nt, nlat, nlon, map2vec, nvec,
                 dtype=np.float32, memmap=True):
     """
     load binary datasets from dpath [nt, nlat, nlon]
@@ -34,17 +34,17 @@ def load_data3d(dpath, nt, nlat, nlon,
         memmap reads part of data without any warning,
         which is problematic.
     """
-    shape2d = nlat * nlon
     if memmap:
         # data shape must be correct,
         # otherwise memmap will only load part of the data without warnings
         data = np.memmap(dpath, dtype=dtype, mode="r",
-                         shape=(nt, shape2d), order="C")
+                         shape=(nt, nlat, nlon), order="C")
     else:
         # not using out-of-core memory mapping, load whole data onto memory
         # this will benefit slight performance gain for array manipulation
         # but takes time if your data is large to load on.
-        data = np.fromfile(dpath, dtype=dtype).reshape(nt, shape2d)
+        data = np.fromfile(dpath, dtype=dtype).reshape(nt, nlat, nlon)
+    vecdata = vecterize_map(data, map2vec, nvec)
     return data
 
 
