@@ -7,8 +7,7 @@ import pytz
 import subprocess
 import os
 from multiprocessing import Pool
-from pyletkf import pyletkf
-from pyletkf import exTool
+from pyletkf.pyletkf import pyletkf
 import caseExtention as ext
 import dautils as dau
 
@@ -85,6 +84,7 @@ class AssimCama(object):
             varDict = json.load(f)
         self.expname = str(varDict["expname"])
         self.modeldir = str(varDict["modeldir"])
+        self.camagosh = str(varDict["camagosh"])
         self.outdir = os.path.join(self.modeldir, "out",
                                    self.expname, "{0:02d}")
         self.nlon = int(varDict["nlon"])
@@ -122,7 +122,7 @@ class AssimCama(object):
         # check data consistency to avoid mistakes.
         self.check_consistency()
 
-        # instanciate pyletkf
+        # instanciate pyletkf; if local patch is not cached, it will be generated.
         self.dacore = pyletkf.LETKF_core(self.assimconfig,
                                          mode="vector", use_cache=use_cache)
         self.dacore.initialize()
