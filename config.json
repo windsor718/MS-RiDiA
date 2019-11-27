@@ -1,0 +1,19 @@
+{
+    "expname": "MS-RiDiA-prompt01",
+    "modeldir": "/project/uma_colin_gleason/yuta/RiDiA/model/CaMa-Flood_v395b_20191030",
+    "nlon": 466,
+    "nlat": 276,
+    "west": -114.375,
+    "south": 36.125,
+    "res": 0.0500,
+    "rnofdir": "/project/uma_colin_gleason/yuta/RiDiA/model/CaMa-Flood_v395b_20191030/inp/MSR_15min/vic/",
+    "ensrnof": "False",
+    "eTot": 5,
+    "nCPUs": 5,
+    "statevars": ["outwth", "rivman", "rivshp"],
+    "statetype": ["prognostic", "parameter", "parameter"],
+    "obsvars": [1, 0, 0],
+    "assimconfig": "/project/uma_colin_gleason/yuta/RiDiA/dasrc/MS-RiDiA/assimconfig.ini",
+    "cachepath": "/project/uma_colin_gleason/yuta/RiDiA/out/MS-RiDiA/cache",
+    "vecmappath": "/project/uma_colin_gleason/yuta/RiDiA/data/MS-RiDiA/src/mapout/vecmapinfo.hdf5"
+}
