@@ -9,7 +9,6 @@ import os
 from distutils.util import strtobool
 from multiprocessing import Pool
 from pyletkf.pyletkf import pyletkf
-from pyletkf.pyletkf import exTool
 import caseExtention as ext
 import dautils as dau
 
@@ -124,9 +123,11 @@ class AssimCama(object):
                           "dautils.make_vectorized2dIndex, but make sure "
                           "to match with your observation data label.")
 
-        # instanciate pyletkf; if local patch is not cached, it will be generated.
+        # instanciate pyletkf;
+        # if local patch is not cached, it will be generated.
         self.dacore = pyletkf.LETKF_core(self.assimconfig,
-                                         mode="vector", use_cache=use_cached_lp)
+                                         mode="vector",
+                                         use_cache=use_cached_lp)
         self.dacore.initialize()
 
         # check data consistency to avoid mistakes.
@@ -156,7 +157,7 @@ class AssimCama(object):
         date = sdate
         nT = 0
         while date < edate:
-            date, nT = self.driver(date, nT, self.obs_dset)
+            date, nT = self.driver(date, self.obs_dset)
 
     def restart(self, edate):
         # read most rescent backup info
@@ -175,8 +176,8 @@ class AssimCama(object):
         while date < edate:
             date, nT = self.driver(date, nT)
 
-    def driver(self, date, nT, obs_dset):
-        ndate, nT = self.forward(date, nT,
+    def driver(self, date, obs_dset):
+        ndate, nT = self.forward(date,
                                  ensrnof=self.ensrnof, restart=True)
         adate = ndate - datetime.timedelta(seconds=86400)
         self.filtering(adate, nT, obs_dset)
@@ -199,7 +200,7 @@ class AssimCama(object):
         print("checking local patch loaded...")
         print(len(self.dacore.patches))
         assert len(self.dacore.patches) == nvec, "cached local patch size" +\
-                                           "does not match with vector size."
+            "does not match with vector size."
         print("ok.")
 
     def get_nextSimDates(self, date, assimdates):
@@ -254,9 +255,9 @@ class AssimCama(object):
         """
         utc = pytz.utc
         dates = obsdset["time"].values
+        # dates.tolist() converts np.datetime64 to posix timestamp
         dtdates = [datetime.datetime.utcfromtimestamp(date/1e9) for date in
-                   dates.tolist()]  # dates.tolist() converts np.datetime64
-                                    # to posix timestamp
+                   dates.tolist()]
         dates = [utc.localize(dtdate) for dtdate in dtdates]
         return dates
 
@@ -326,7 +327,7 @@ class AssimCama(object):
     #
 
     # forwarding functions
-    def forward(self, date, nT, ensrnof=False, restart=True):
+    def forward(self, date, ensrnof=False, restart=True):
         """
         fowwarding a state until next observation is available.
 
@@ -355,7 +356,7 @@ class AssimCama(object):
         p.map(run_CaMa_, argslist)
         p.close()
         ndate = simrange[1] + datetime.timedelta(seconds=86400)
-        nT += (ndate-date).days
+        nT = (ndate-date).days
         print(date, ndate, nT)  # check carefully
         return ndate, nT
     #
@@ -375,12 +376,23 @@ class AssimCama(object):
         # pyletkf assumes double precision
         statevector = statevector.astype(np.float64)
         obs = obs.astype(np.float64)
-        obserror = obs.astype(np.float64)
+        obserr = obs.astype(np.float64)
         xa, _ = self.dacore.letkf_vector(statevector, obs, obserr, self.obsvars,
-                                      nCPUs=self.nCPUs, smoother=False)
+                                         nCPUs=self.nCPUs, smoother=False)
         self.update_states(xa, nT, date)
 
     def const_statevector(self, nT):
+        """
+        construct statevector by reading files.
+        variables are specified in register()
+
+        Args:
+            nT (int): number of time steps passed, or number of layers
+            (REC in Fortran) in your file.
+
+        Returns:
+            np.ndarray-like: memory mapped array like object
+        """
         # create buffer array, this is used for concatenating memmap objects.
         buffer = np.memmap(self.dummyfile, dtype=np.float32, mode="w+",
                            shape=(len(self.statevars), self.eTot,

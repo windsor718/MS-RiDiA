@@ -4,9 +4,7 @@ import pandas as pd
 import warnings
 import subprocess
 import datetime
-from numba import jit
 import dautils as dau
-import warnings
 import calc_storage
 
 """
@@ -106,6 +104,9 @@ def gain_perturbation(var, outdir, mapdir, nlat, nlon, eTot,
 #@jit
 def get_map2d_from_lognormal(widths2d, widthMed,
                              paramLogMean, paramLogStd, min, max, eTot, undef=-9999):
+    """
+    get purterbated 2dmap from lognormal distribution.
+    """
     nlat = widths2d.shape[0]
     nlon = widths2d.shape[1]
     outarray = np.zeros([eTot, nlat, nlon])
@@ -119,9 +120,9 @@ def get_map2d_from_lognormal(widths2d, widthMed,
             mean = paramLogMean[idx]
             std = paramLogStd[idx]
             out = np.random.lognormal(mean, std, size=eTot)
-            #out = np.exp(logwths)
-            out[out>max] = max
-            out[out<min] = min
+            # out = np.exp(logwths)
+            out[out > max] = max
+            out[out < min] = min
             outarray[:, ilat, ilon] = out
     return outarray
 
@@ -192,7 +193,7 @@ def make_vars(modeldir, expname, rnofdir, simrange, eNum,
     ysta = simrange[0].year
     smon = simrange[0].month
     sday = simrange[0].day
-    edate = simrange[1] + datetime.timedelta(seconds=86400)  # by next date 0:00
+    edate = simrange[1] + datetime.timedelta(seconds=86400)  # by next date 00:00
     yend = edate.year
     emon = edate.month
     eday = edate.day
@@ -242,10 +243,9 @@ def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat,
     Returns:
         None
     """
-    nvec = len(vec2lat)
     save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f)
-    rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon, nlfp,
-                    dtype_f=dtype_f)
+    rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon,
+                    nlfp, dtype_f=dtype_f)
     # write new rivbta.bin based on new rivshp.bin
     crivshp = os.path.join(outdir, "param", "rivshp.bin")
     crivbta = os.path.join(outdir, "param", "rivbta.bin")
@@ -253,10 +253,15 @@ def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat,
     subprocess.check_call(["./fsrc/calc_rivbta", crivshp, crivbta, cnextxy, str(nlon), str(nlat)])
 
     # add noise to avoid convergence
-    add_noise(xa_each, outdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon, dtype_f)
+    add_noise(xa_each, outdir, nlon, nlat, nt, map2vec,
+              vec2lat, vec2lon, dtype_f)
+
+    # rename files
     for var in ["outflw.bin", "outwth.bin"]:
-        outname = "{0}_{1}.bin".format(var.split(".")[0], edate.strftime("%Y%m%d"))
-        subprocess.check_call(["cp", os.path.join(outdir, var), os.path.join(outdir, outname)])
+        outname = "{0}_{1}.bin".format(var.split(".")[0],
+                                       edate.strftime("%Y%m%d"))
+        subprocess.check_call(["mv", os.path.join(outdir, var),
+                               os.path.join(outdir, outname)])
 
 
 def rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon,
@@ -291,29 +296,31 @@ def rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon,
     nvec = len(vec2lat)
     # load data in vectorized format
     rivwth = dau.load_data3d(os.path.join(mapdir, "rivwth_gwdlr.bin"),
-                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+                             1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
     rivlen = dau.load_data3d(os.path.join(mapdir, "rivlen.bin"),
-                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+                             1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
     rivhgt = dau.load_data3d(os.path.join(mapdir, "rivhgt.bin"),
-                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+                             1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
     grarea = dau.load_data3d(os.path.join(mapdir, "ctmare.bin"),
-                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+                             1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
     fldgrd = dau.load_data3d(os.path.join(mapdir, "fldgrd.bin"),
-                            nlfp, nlat, nlon, map2vec, nvec,
-                            dtype=np.float32)[:]
+                             nlfp, nlat, nlon, map2vec, nvec,
+                             dtype=np.float32)[:]
     # after assimilation file is saved
     rivshp = dau.load_data3d(os.path.join(outdir, "param/rivshp.bin"),
-                            1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+                             1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
     print(rivshp)
     outwth = dau.load_data3d(os.path.join(outdir, "outwth.bin"),
-                            nt, nlat, nlon, map2vec, nvec, dtype=np.float32)[-1]
+                             nt, nlat, nlon, map2vec, nvec, dtype=np.float32)[-1]
     storage = calc_storage.get_storage_invertsely(outwth, rivwth, rivlen, rivhgt,
                                                   rivshp, grarea, fldgrd, nvec,
                                                   nlfp=nlfp, undef=-9999)
     print(storage)
     restart = np.zeros([2, nlat, nlon])
-    restart[0] = dau.revert_map(storage[0].reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
-    restart[1] = dau.revert_map(storage[1].reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    restart[0] = dau.revert_map(storage[0].reshape(1, nvec),
+                                vec2lat, vec2lon, nlat, nlon)[0]
+    restart[1] = dau.revert_map(storage[1].reshape(1, nvec),
+                                vec2lat, vec2lon, nlat, nlon)[0]
     restart.flatten().astype(dtype_f).tofile(
                                              os.path.join(outdir, "restart.bin")
                                              )
@@ -339,25 +346,28 @@ def save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f):
     nvec = len(vec2lat)
     # update outwth
     data = np.memmap(os.path.join(outdir, "outwth.bin"), dtype=dtype_f,
-                      shape=(nt, nlat, nlon), mode="w+")  # use carefully!
-    tmp = dau.revert_map(xa_each[0, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+                     shape=(nt, nlat, nlon), mode="w+")  # use carefully!
+    tmp = dau.revert_map(xa_each[0, :].astype(dtype_f).reshape(1, nvec),
+                         vec2lat, vec2lon, nlat, nlon)[0]
     tmp = np.absolute(tmp)
     data[-1, :, :] = tmp[:, :]
     del data  # closing and flushing changes to disk
 
     data0 = np.memmap(os.path.join(outdir, "param/rivhgt.bin"), dtype=dtype_f,
                       shape=(nlat, nlon), mode="w+")  # use carefully!
-    tmp = dau.revert_map(xa_each[1, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp = dau.revert_map(xa_each[1, :].astype(dtype_f).reshape(1, nvec),
+                         vec2lat, vec2lon, nlat, nlon)[0]
     tmp[tmp == 1e+20] = -9999
-    tmp[tmp<1] = 1
+    tmp[tmp < 1] = 1
     data0[:, :] = tmp[:, :]
     del data0
 
     data1 = np.memmap(os.path.join(outdir, "param/rivman.bin"), dtype=dtype_f,
                       shape=(nlat, nlon), mode="w+")  # use carefully!
-    tmp = dau.revert_map(xa_each[2, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp = dau.revert_map(xa_each[2, :].astype(dtype_f).reshape(1, nvec),
+                         vec2lat, vec2lon, nlat, nlon)[0]
     tmp[tmp == 1e+20] = -9999
-    tmp[tmp<0.01] = 0.01
+    tmp[tmp < 0.01] = 0.01
     data1[:, :] = tmp[:, :]
     del data1
 
@@ -365,8 +375,8 @@ def save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f):
                       shape=(nlat, nlon), mode="w+")  # use carefully!
     tmp = dau.revert_map(xa_each[3, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
     tmp[tmp == 1e+20] = -9999
-    tmp[tmp<1] = 1
-    data2[:, :] = tmp[: ,:]
+    tmp[tmp < 1] = 1
+    data2[:, :] = tmp[:, :]
     del data2
 
 
@@ -406,9 +416,9 @@ def add_noise(xa_each, outdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon, dtype_
     data2 = np.memmap(os.path.join(outdir, "param/rivshp.bin"), dtype=dtype_f,
                       shape=(nlat, nlon), mode="w+")  # use carefully!
     next2 = multiply_normalnoise(xa_each[3, :], 0.25, 0.5, 1.5)
-    tmp = dau.revert_map(xa_each[3, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp = dau.revert_map(next2.astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
     tmp[tmp == 1e+20] = -9999
     tmp[tmp < 1] = 1
-    data2[:, :] = tmp[: ,:]
+    data2[:, :] = tmp[:, :]
     del data2
 #
