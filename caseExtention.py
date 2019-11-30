@@ -17,6 +17,10 @@ A wrapper called from AssimCama is:
     - gain_perturbation: returns generated array
     - make_vars: generate text file and returns path
     - update_states: overwrite results and returns void
+                     make sure to rename (mv) your ${var}.bin to
+                     ${var}_yyyymmdd.bin where yyyymmdd is your assimilated
+                     date. This is to avoid CaMa overwrite your result in
+                     the next execution (CaMa will try to write REC=tstep).
 Keeping those wrapper names/functions would make code integration easy/clean.
 """
 
