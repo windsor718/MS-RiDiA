@@ -44,8 +44,8 @@ def load_data3d(dpath, nt, nlat, nlon, map2vec, nvec,
         # this will benefit slight performance gain for array manipulation
         # but takes time if your data is large to load on.
         data = np.fromfile(dpath, dtype=dtype).reshape(nt, nlat, nlon)
-    vecdata = vecterize_map(data, map2vec, nvec)
-    return data
+    vecdata = vectorize_map(data, map2vec, nvec)
+    return vecdata
 
 
 def define_state_vector(keys, datapaths):
@@ -191,7 +191,7 @@ def vectorize_map(map3d, map2vec, nvec):
     return outvector
 
 
-def revert_map(vec2d, vec2lat, vec2lon, nlon, nlat):
+def revert_map(vec2d, vec2lat, vec2lon, nlat, nlon):
     """
     get 2d map with layers (3d) from 1d vector with layers (2d).
 

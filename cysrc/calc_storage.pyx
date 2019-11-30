@@ -25,51 +25,55 @@ def get_storage_invertsely(my_type[:] outwth, my_type[:] rivwth,
     cdef my_type wthinc
     cdef my_type Ariv
     cdef my_type Aflp
+    cdef my_type Atmp
 
     if my_type is double:
         DTYPE = np.float64
     elif my_type is float:
         DTYPE = np.float32
     storage = np.zeros([2, nvec], dtype=DTYPE)
-    cdef my_type [:, :] storage_view = storage 
-    with nogil:
-        for iv in prange(0, nvec):
-            if rivhgt[iv] == undef:
+    cdef my_type [:, :] storage_view = storage
+    #for iv in prange(0, nvec, nogil=True):
+    for iv in range(0, nvec):
+        if rivhgt[iv] == undef:
+            continue
+        if outwth[iv] < rivwth[iv]:
+            # inbank
+            s = rivshp[iv]
+            wflw = outwth[iv]
+            hflw = rivhgt[iv]*((wflw/rivwth[iv])**s)
+            Ariv = wflw * hflw * (1-(1/(s+1)))
+            Aflp = 0
+        else:
+            # outbank
+            wflw = rivwth[iv]
+            hflw = rivhgt[iv]
+            s = rivshp[iv]
+            Ariv = wflw * hflw * (1-(1/(s+1)))
+            wflp = outwth[iv]
+            wthpre = rivwth[iv]
+            dphpre = 0
+            layer = 0
+            wthinc = grarea[iv]/(rivlen[iv]*nlfp)
+            while wthpre < wflp:
+                wthpre = wthinc + wthpre
+                dphpre = fldgrd[layer, iv]*wthinc + dphpre
+                layer  = 1 + layer
+                if layer == nlfp-1:
+                    break
+            if layer == nlfp:
+                # flow is over cell, assimilation may not be good in this grid.
+                # leave it as it was or make it fldstomax.
+                print("flow exceeded grid")
                 continue
-            if outwth[iv] < rivwth[iv]:
-                # inbank
-                s = rivshp[iv]
-                wflw = outwth[iv]
-                hflw = rivhgt[iv]*(wflw/rivwth[iv])**(1/s)
-                Ariv = wflw*hflw*(1-(1/(s+1)))
-                Aflp = 0
             else:
-                # outbank
-                wflw = rivwth[iv]
-                hflw = rivhgt[iv]
-                s = rivshp[iv]
-                Ariv = wflw * hflw * (1-(1/(s+1)))
+                hflp = dphpre + (wflp-wthpre)*fldgrd[layer-1, iv]
+            Atmp = (wflp + wflw) * hflp / 2.
+            Ariv = Ariv + wflw*hflp
+            Aflp = Atmp - wflw*hflp
 
-                wflp = outwth[iv]
-                wthpre = 0
-                dphpre = 0
-                layer = 0
-                wthinc = grarea[iv]*rivlen[iv]**(-1.)*nlfp**(-1)
-                while wthpre < wflp:
-                    wthpre = wthinc + wthpre
-                    dphpre = fldgrd[layer, iv]*wthinc + dphpre
-                    layer  = 1 + layer
-                    if layer == nlfp:
-                        break
-                if layer == nlfp:
-                    # flow is over cell, assimilation may not be good in this grid.
-                    # leave it as it was or make it fldstomax.
-                    continue
-                else:
-                    hflp = dphpre + (wflp-wthpre)*fldgrd[layer, iv]
-                Aflp = (wflp + wflw) * hflp / 2.
-            storage_view[0, iv] = rivlen[iv] * Ariv
-            storage_view[1, iv] = rivlen[iv] * Aflp
-    print(storage_view)
-    print(storage)
+        storage_view[0, iv] = rivlen[iv] * Ariv
+        if storage_view[0, iv] > 1e6:
+            print(iv, outwth[iv], rivwth[iv], hflw, rivhgt[iv], wflp, hflp, s)
+        storage_view[1, iv] = rivlen[iv] * Aflp
     return storage

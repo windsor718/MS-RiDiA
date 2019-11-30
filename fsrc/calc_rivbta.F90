@@ -74,12 +74,11 @@ program calc_rivbta
 ! read parameters from arguments
 
       call getarg(1,buf)
-       if( buf/='' ) read(buf,*) crivshp
+       if( buf/='' ) read(buf,'(a256)') crivshp
       call getarg(2,buf)
-       if( buf/='' ) read(buf,*) crivbta
-
+       if( buf/='' ) read(buf,'(a256)') crivbta
       call getarg(3,buf)
-       if( buf/='' ) read(buf,*) cnextxy
+       if( buf/='' ) read(buf,'(a256)') cnextxy
       call getarg(4,buf)
        if( buf/='' ) read(buf,*) nx
       call getarg(5,buf)
@@ -87,18 +86,19 @@ program calc_rivbta
 
 ! ==============================
 
+      allocate(nextx(nx,ny))
+      allocate(nexty(nx,ny))
       allocate(rivshp(nx,ny))
       allocate(rivbta(4,nx,ny))
 
 ! ===================
 
-      cnextxy='./nextxy.bin'
-      open(11,file=cnextxy,form='unformatted',access='direct',recl=4*nx*ny,status='old',iostat=ios)
+      open(11,file=trim(cnextxy),form='unformatted',access='direct',recl=4*nx*ny,status='old',iostat=ios)
       read(11,rec=1) nextx
       read(11,rec=2) nexty
       close(11)
 
-      open(15,file=crivshp,form='unformatted',access='direct',recl=4*nx*ny)
+      open(15,file=trim(crivshp),form='unformatted',access='direct',recl=4*nx*ny)
       read(15,rec=1) rivshp
       close(13)
 
@@ -118,9 +118,9 @@ program calc_rivbta
       end do
 ! =============================
 
-      open(22,file=crivbta,form='unformatted',access='direct',recl=4*nx*ny)
+      open(22,file=trim(crivbta),form='unformatted',access='direct',recl=4*nx*ny)
       do ilp=1, 4, 1
-        write(22,rec=1) rivbta(ilp,:,:)
+        write(22,rec=ilp) rivbta(ilp,:,:)
       end do
       close(22)
 

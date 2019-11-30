@@ -15,7 +15,7 @@ cdef np.float32_t undef_float = 1e+20
 def make_vectorizedIndex(const np.int32_t[:,:] domain):
     """
     Based on array-like object, domain, make vector indices
-    and convertion matrix. domain should contain any positive values 
+    and convertion matrix. domain should contain any positive values
     in the cell where you want to include in vectors, and negatives for
     those you do not want to.
 
@@ -150,7 +150,7 @@ def vectorize_map3d_int32(const np.int32_t [:, :, :] inputmap,
     for i in range(nvar):
         veclayer_view = vectorize_map2d_int32(inputmap[i], map2vec, nvec)
         vec_view[i, :] = veclayer_view
-    
+
     return vec
 
 
@@ -171,7 +171,7 @@ def vectorize_map3d_float32(const np.float32_t [:, :, :] inputmap,
     for i in range(nvar):
         veclayer_view = vectorize_map2d_float32(inputmap[i], map2vec, nvec)
         vec_view[i, :] = veclayer_view
-   
+
     return vec
 
 
@@ -210,7 +210,7 @@ def revert_layers_grid_int32(const np.int32_t[:, :] inputvector,
     wrapper to handle 1d vector with multiple layers
     """
     cdef int il
-    cdef int nvec = vec2lat.shape[0]
+    cdef int nvec = len(vec2lat)
     cdef int nlayer = inputvector.shape[0]
     layer = np.ones([nlat, nlon], dtype=np.int32)*undef_int
     cdef np.int32_t [:, :] layer_view = layer
@@ -235,7 +235,7 @@ def revert_grid_float32(const np.float32_t[:] inputvector,
     vec2lat and vec2lon array.
     """
     cdef int iv
-    cdef int nvec = vec2lat.shape[0]
+    cdef int nvec = len(vec2lat)
     cdef np.int32_t ilat
     cdef np.int32_t ilon
 

@@ -2,8 +2,12 @@ import numpy as np
 import os
 import pandas as pd
 import warnings
+import subprocess
+import datetime
 from numba import jit
-import dautils as du
+import dautils as dau
+import warnings
+import calc_storage
 
 """
 a set of case-specific functions.
@@ -30,11 +34,11 @@ warnings.warn(string.format(caseCode, svals[0], svals[1], svals[2]))
 
 
 # utilities-initialization functions
-def gain_perturbation(var, refmappath, nlat, nlon, eTot, dtype_f=np.float32):
+def gain_perturbation(var, outdir, mapdir, nlat, nlon, eTot,
+                      dtype_f=np.float32):
     """
     get perturbated initial parameters and save those in outdir file.
     You should save every parameters in state variables in outdir.
-
     Args:
         var (str): variable name
         refmappath (str): path to reference 2d map parameter
@@ -45,39 +49,65 @@ def gain_perturbation(var, refmappath, nlat, nlon, eTot, dtype_f=np.float32):
                             must be similar to model data type.
     """
     # read background prior information
-    widthclass = pd.read_csv("./WidthsClass.csv", index_col=0)
+    widthclass = pd.read_csv("/home/yi79a/yuta/RiDiA/data/MS-RiDiA/rawdata/priorinfo/WidthsClass.csv", index_col=0)
     # convert from loged value to normal value
     widthMed = widthclass["50%"].apply(lambda x: np.exp(x)).tolist()
-    widths2d = np.memmap(refmappath, dtype=dtype_f,
-                         shape=(nlat, nlon), mode="r")
+    widths2d = np.memmap(os.path.join(mapdir, "rivwth_gwdlr.bin"),
+                         dtype=dtype_f, shape=(nlat, nlon), mode="r")
     if var == "rivman":
-        widths2d = np.memmap(refmappath, dtype=dtype_f,
-                             shape=(nlat, nlon), mode="r")
-        nclass = pd.read_csv("./priorsNClass.csv", index_col=0)
+        nclass = pd.read_csv("/home/yi79a/yuta/RiDiA/data/MS-RiDiA/rawdata/priorinfo/priorsNClass.csv", index_col=0)
         nLogMean = nclass["mean"].tolist()
         nLogStd = nclass["std"].tolist()
         outarray = get_map2d_from_lognormal(widths2d, widthMed,
-                                            nLogMean, nLogStd, eTot)
+                                            nLogMean, nLogStd, 0.005, 1.0, eTot)
     elif var == "rivshp":
-        widths2d = np.memmap(refmappath, dtype=dtype_f,
-                             shape=(nlat, nlon), mode="r")
-        sclass = pd.read_csv("./priorsRClass.csv", index_col=0)
+        sclass = pd.read_csv("/home/yi79a/yuta/RiDiA/data/MS-RiDiA/rawdata/priorinfo/priorsRClass.csv", index_col=0)
         sLogMean = sclass["mean"].tolist()
         sLogStd = sclass["std"].tolist()
         outarray = get_map2d_from_lognormal(widths2d, widthMed,
-                                            nLogMean, nLogStd, eTot)
-    elif var == "rivhgt":
-        rivhgt2d = np.memmap(refmappath, dtype=dtype_f,
-                             shape=(nlat, nlon), mode="r")
-        outarray = get_rivhgt2d_from_lognormal(rivhgt2d, eTot, std=1.5)
-    return outarray
+                                            sLogMean, sLogStd, 1, 20, eTot)
+    # deprecated
+    # elif var == "rivhgt":
+    #     rivhgt2d = np.memmap(os.path.join(mapdir, "rivhgt.bin"), dtype=dtype_f,
+    #                          shape=(nlat, nlon), mode="r")
+    #     outarray = get_rivhgt2d_from_lognormal(rivhgt2d, eTot, pstd=20)
+    #
+    for e in range(eTot):
+        odir = outdir.format(e)
+        paramdir = os.path.join(odir, "param")
+        if not os.path.exists(paramdir):
+            os.makedirs(paramdir)
+        bkupdir = os.path.join(odir, "init")
+        if not os.path.exists(bkupdir):
+            os.makedirs(bkupdir)
+        fn = "{0}.bin".format(var)
+        if var == "rivhgt":
+            get_rivhgt2d(mapdir, paramdir, fn, nlat, nlon,
+                         hc_min=0.05, hc_max=0.5, hp_min=0.1, hp_max=0.7)
+        else:
+            sf = outarray[e].flatten().astype(dtype_f)
+            sf.tofile(os.path.join(paramdir, fn))
+            sf.tofile(os.path.join(bkupdir, fn))
+        print("output parameter file: {0}".format(os.path.join(paramdir, fn)))
+        print("backup parameter file: {0}".format(os.path.join(bkupdir, fn)))
+
+        if var == "rivshp":
+            crivshp = os.path.join(paramdir, fn)
+            crivbta = os.path.join(paramdir, "rivbta.bin")
+            cnextxy = os.path.join(mapdir, "nextxy.bin")
+            print("output parameter file: {0}".format(os.path.join(paramdir, "rivbta.bin")))
+            subprocess.check_call(["/home/yi79a/yuta/RiDiA/srcda/MS-RiDiA/fsrc/calc_rivbta", crivshp, crivbta,
+                                  cnextxy, str(nlon), str(nlat)])
+            print("backup parameter file: {0}".format(os.path.join(bkupdir, "rivbta.bin")))
+            subprocess.check_call(["cp", os.path.join(paramdir, "rivbta.bin"),
+                                   os.path.join(bkupdir, "rivbta.bin")])
 
 
-@jit
+#@jit
 def get_map2d_from_lognormal(widths2d, widthMed,
-                             paramLogMean, paramLogStd, eTot, undef=-9999):
-    nlat = width2d.shape[0]
-    nlon = width2d.shape[1]
+                             paramLogMean, paramLogStd, min, max, eTot, undef=-9999):
+    nlat = widths2d.shape[0]
+    nlon = widths2d.shape[1]
     outarray = np.zeros([eTot, nlat, nlon])
     for ilat in range(nlat):
         for ilon in range(nlon):
@@ -85,27 +115,53 @@ def get_map2d_from_lognormal(widths2d, widthMed,
             if width == undef:
                 outarray[:, ilat, ilon] = undef
                 continue
-            idx = np.argmin(np.array(widthMed) - width)
+            idx = np.argmin(np.absolute(np.array(widthMed) - width))
             mean = paramLogMean[idx]
             std = paramLogStd[idx]
-            logwths = np.random.lognormal(mean, std, size=eTot)
-            outarray[:, ilat, ilon] = np.exp(logwths)
+            out = np.random.lognormal(mean, std, size=eTot)
+            #out = np.exp(logwths)
+            out[out>max] = max
+            out[out<min] = min
+            outarray[:, ilat, ilon] = out
     return outarray
 
 
-@jit
-def get_rivhgt2d_from_lognormal(rivhgt2d, eTot, std=1.5, undef=-9999):
+def get_rivhgt2d(mapdir, paramdir, fn, nlat, nlon,
+                 hc_min=0.05, hc_max=0.5, hp_min=0.1, hp_max=0.7):
+    cnextxy = os.path.join(mapdir, "nextxy.bin")
+    crivout = os.path.join(mapdir, "outclm.bin")
+    crivhgt = os.path.join(paramdir, fn)
+    hc = np.random.uniform(hc_min, hc_max, 1)[0]
+    hp = np.random.uniform(hp_min, hp_max, 1)[0]
+    subprocess.check_call(["/home/yi79a/yuta/RiDiA/srcda/MS-RiDiA/fsrc/calc_rivhgt", crivout, crivhgt,
+                          cnextxy, str(hc), str(hp),
+                          str(nlon), str(nlat)])
+
+
+#@jit
+def get_rivhgt2d_from_lognormal(rivhgt2d, eTot, pstd=20,
+                                hgtlimit=10, undef=-9999):
+    """
+    deprecated
+    """
     nlat = rivhgt2d.shape[0]
     nlon = rivhgt2d.shape[1]
     outarray = np.zeros([eTot, nlat, nlon])
-    for ilat in range(nlat):
-        for ilon in range(nlon):
-            if rivhgt[ilat, ilon] == undef:
-                outarray[:, ilat, ilon] = undef
-                continue
-            mean = np.log(rivhgt[ilat, ilon])
-            loghgts = np.random.lognormal(mean, std, size=eTot)
-            outarray[:, ilat, ilon] = np.exp(loghgts)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('error')
+        for ilat in range(nlat):
+            for ilon in range(nlon):
+                if rivhgt2d[ilat, ilon] == undef:
+                    outarray[:, ilat, ilon] = undef
+                    continue
+                mean = np.log(rivhgt2d[ilat, ilon])
+                std = mean+pstd/1000
+                loghgts = np.ones([eTot])*1e+20
+                limit = np.log(rivhgt2d[ilat, ilon]*hgtlimit)
+                while (loghgts > limit).any():
+                    loghgts = np.random.lognormal(mean, std,
+                                                  size=eTot)
+                outarray[:, ilat, ilon] = np.exp(loghgts)
     return outarray
 
 
@@ -132,33 +188,34 @@ def make_vars(modeldir, expname, rnofdir, simrange, eNum,
     """
     base = modeldir
     exp = expname
-    rdir = os.path.join(base, "out/{0}/{1:03d}".format(exp, eNum))
+    rdir = os.path.join(base, "out/{0}/{1:02d}".format(exp, eNum))
     ysta = simrange[0].year
     smon = simrange[0].month
     sday = simrange[0].day
-    yend = simrange[1].year
-    emon = simrange[1].month
-    eday = simrange[1].day
+    edate = simrange[1] + datetime.timedelta(seconds=86400)  # by next date 0:00
+    yend = edate.year
+    emon = edate.month
+    eday = edate.day
     if ensrnof:
         crofdir = rnofdir % eNum
     else:
         crofdir = rnofdir
     if restart:
-        spinup = 0
-    else:
         spinup = 1
-    crivhgt = os.path.join(rdir, "rivhgt.bin")
-    crivman = os.path.join(rdir, "rivman.bin")
-    crivshp = os.path.join(rdir, "rivshp.bin")
-    crivbta = os.path.join(rdir, "rivbta.bin")
-    namelist = ["BASE", "EXP", "RDIR", "YSTA", "SMON", "SDAY", "SPINUP"
+    else:
+        spinup = 0
+    crivhgt = os.path.join(rdir, "param/rivhgt.bin")
+    crivman = os.path.join(rdir, "param/rivman.bin")
+    crivshp = os.path.join(rdir, "param/rivshp.bin")
+    crivbta = os.path.join(rdir, "param/rivbta.bin")
+    namelist = ["BASE", "EXP", "RDIR", "YSTA", "SMON", "SDAY", "SPINUP",
                 "YEND", "EMON", "EDAY", "CROFDIR", "CRIVHGT",
                 "CRIVMAN", "CRIVSHP", "CRIVBTA"]
     varlist = [base, exp, rdir, ysta, smon, sday, spinup,
                yend, emon, eday, crofdir, crivhgt,
                crivman, crivshp, crivbta]
-    outpath = os.path.join(rdir, "vars_{0:02d}".format(eNum))
-    with open(outpath) as f:
+    outpath = os.path.join(rdir, "vars_{0:02d}.txt".format(eNum))
+    with open(outpath, "w") as f:
         for name, var in zip(namelist, varlist):
             f.write("{0}={1}\n".format(name, var))
     return outpath
@@ -167,7 +224,7 @@ def make_vars(modeldir, expname, rnofdir, simrange, eNum,
 
 # multiprocessing; post-processing functions
 def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat,
-                  vec2lon, eNum, nlfp, dtype_f=np.float32):
+                  vec2lon, eNum, nlfp, edate, dtype_f=np.float32):
     """
     update parameters from assimilated state vectors
 
@@ -186,16 +243,23 @@ def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat,
         None
     """
     nvec = len(vec2lat)
-    save_update(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f)
-    rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, nvec, nlfp,
-                    dtype_f=np.float32)
+    save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f)
+    rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon, nlfp,
+                    dtype_f=dtype_f)
     # write new rivbta.bin based on new rivshp.bin
-    crivshp = os.path.join(outdir, "rivshp.bin")
-    crivbta = os.path.join(outdir, "rivbta.bin")
-    subprocess.check_call("./fsrc/calc_rivbta", crivshp, crivbta, nlon, nlat)
+    crivshp = os.path.join(outdir, "param", "rivshp.bin")
+    crivbta = os.path.join(outdir, "param", "rivbta.bin")
+    cnextxy = os.path.join(mapdir, "nextxy.bin")
+    subprocess.check_call(["./fsrc/calc_rivbta", crivshp, crivbta, cnextxy, str(nlon), str(nlat)])
+
+    # add noise to avoid convergence
+    add_noise(xa_each, outdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon, dtype_f)
+    for var in ["outflw.bin", "outwth.bin"]:
+        outname = "{0}_{1}.bin".format(var.split(".")[0], edate.strftime("%Y%m%d"))
+        subprocess.check_call(["cp", os.path.join(outdir, var), os.path.join(outdir, outname)])
 
 
-def rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, nvec,
+def rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon,
                     nlfp=10, dtype_f=np.float32):
     """
     re-write restart file (storage-only) to update initial condition
@@ -224,6 +288,7 @@ def rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, nvec,
         then nt=10. This number is usually the number of outer model loop
         passed.
     """
+    nvec = len(vec2lat)
     # load data in vectorized format
     rivwth = dau.load_data3d(os.path.join(mapdir, "rivwth_gwdlr.bin"),
                             1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
@@ -236,21 +301,22 @@ def rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, nvec,
     fldgrd = dau.load_data3d(os.path.join(mapdir, "fldgrd.bin"),
                             nlfp, nlat, nlon, map2vec, nvec,
                             dtype=np.float32)[:]
-    nvec = nlat*nlon
     # after assimilation file is saved
-    rivshp = dau.load_data3d(os.path.join(outdir, "rivshp.bin"),
+    rivshp = dau.load_data3d(os.path.join(outdir, "param/rivshp.bin"),
                             1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
+    print(rivshp)
     outwth = dau.load_data3d(os.path.join(outdir, "outwth.bin"),
                             nt, nlat, nlon, map2vec, nvec, dtype=np.float32)[-1]
-    storage = invert_storage(outwth, rivwth, rivlen, rivhgt,
-                             nvec, rivshp, grarea, fldgrd,
-                             nlfp=nlfp, undef=-9999)
+    storage = calc_storage.get_storage_invertsely(outwth, rivwth, rivlen, rivhgt,
+                                                  rivshp, grarea, fldgrd, nvec,
+                                                  nlfp=nlfp, undef=-9999)
+    print(storage)
     restart = np.zeros([2, nlat, nlon])
-    restart[0] = du.vec2map(storage[0])
-    restart[1] = du.vec2map(storage[1])
+    restart[0] = dau.revert_map(storage[0].reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    restart[1] = dau.revert_map(storage[1].reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
     restart.flatten().astype(dtype_f).tofile(
-                                        os.path.join(outdir, "restart.bin")
-                                        )
+                                             os.path.join(outdir, "restart.bin")
+                                             )
 
 
 def save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f):
@@ -266,23 +332,83 @@ def save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f):
         nlat (int): number of latitudinal grid cells
         nt (int): number of time (first dimension) for sim. output files
         dtype_f (np object): data type for float in numpy object
+
+    ToDo:
+        Maybe add disturbance on parameters?
     """
     nvec = len(vec2lat)
     # update outwth
-    data0 = np.memmap(os.path.join(outdir, "outwth.bin"), dtype=dtype_f,
+    data = np.memmap(os.path.join(outdir, "outwth.bin"), dtype=dtype_f,
                       shape=(nt, nlat, nlon), mode="w+")  # use carefully!
-    data0[-1] = dau.revert_map(xa_each[0, :].astype(dtype_f).reshape(1, nvec))
-    del data0  # closing and flushing changes to disk
-    data1 = np.memmap(os.path.join(outdir, "rivman.bin"), dtype=dtype_f,
+    tmp = dau.revert_map(xa_each[0, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp = np.absolute(tmp)
+    data[-1, :, :] = tmp[:, :]
+    del data  # closing and flushing changes to disk
+
+    data0 = np.memmap(os.path.join(outdir, "param/rivhgt.bin"), dtype=dtype_f,
                       shape=(nlat, nlon), mode="w+")  # use carefully!
-    data1 = dau.revert_map(xa_each[1, :].astype(dtype_f).reshape(1, nvec))
+    tmp = dau.revert_map(xa_each[1, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp[tmp == 1e+20] = -9999
+    tmp[tmp<1] = 1
+    data0[:, :] = tmp[:, :]
+    del data0
+
+    data1 = np.memmap(os.path.join(outdir, "param/rivman.bin"), dtype=dtype_f,
+                      shape=(nlat, nlon), mode="w+")  # use carefully!
+    tmp = dau.revert_map(xa_each[2, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp[tmp == 1e+20] = -9999
+    tmp[tmp<0.01] = 0.01
+    data1[:, :] = tmp[:, :]
     del data1
-    data2 = np.memmap(os.path.join(outdir, "rivshp.bin"), dtype=dtype_f,
+
+    data2 = np.memmap(os.path.join(outdir, "param/rivshp.bin"), dtype=dtype_f,
                       shape=(nlat, nlon), mode="w+")  # use carefully!
-    data2 = dau.revert_map(xa_each[2, :].astype(dtype_f).reshape(1, nvec))
+    tmp = dau.revert_map(xa_each[3, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp[tmp == 1e+20] = -9999
+    tmp[tmp<1] = 1
+    data2[:, :] = tmp[: ,:]
     del data2
-    # temporally; test purpose
-    data = np.fromfile(os.path.join(outdir, "rivman.bin"), dtype=dtype_f).reshape(nlat, nlon)
-    assert (data == dau.revert_map(xa_each[1, :].astype(dtype_f).reshape(1, nvec))), "not overwriten!"
-    #
+
+
+def multiply_normalnoise(vec, std, min, max):
+    noise = np.random.normal(1, std, 1)
+    if noise < min:
+        noise = min
+    elif noise > max:
+        noise = max
+    return vec*noise
+
+
+def add_noise(xa_each, outdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon, dtype_f):
+    """
+    add noise for next loop.
+    Tweaking needed.
+    """
+    nvec = len(vec2lat)
+    data0 = np.memmap(os.path.join(outdir, "param/rivhgt.bin"), dtype=dtype_f,
+                      shape=(nlat, nlon), mode="w+")  # use carefully!
+    next0 = multiply_normalnoise(xa_each[1, :], 0.25, 0.5, 1.5)
+    tmp = dau.revert_map(next0.astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp[tmp == 1e+20] = -9999
+    tmp[tmp < 1] = 1
+    data0[:, :] = tmp[:, :]
+    del data0
+
+    data1 = np.memmap(os.path.join(outdir, "param/rivman.bin"), dtype=dtype_f,
+                      shape=(nlat, nlon), mode="w+")  # use carefully!
+    next1 = multiply_normalnoise(xa_each[2, :], 0.25, 0.5, 1.5)
+    tmp = dau.revert_map(next1.astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp[tmp == 1e+20] = -9999
+    tmp[tmp < 0.01] = 0.01
+    data1[:, :] = tmp[:, :]
+    del data1
+
+    data2 = np.memmap(os.path.join(outdir, "param/rivshp.bin"), dtype=dtype_f,
+                      shape=(nlat, nlon), mode="w+")  # use carefully!
+    next2 = multiply_normalnoise(xa_each[3, :], 0.25, 0.5, 1.5)
+    tmp = dau.revert_map(xa_each[3, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp[tmp == 1e+20] = -9999
+    tmp[tmp < 1] = 1
+    data2[:, :] = tmp[: ,:]
+    del data2
 #

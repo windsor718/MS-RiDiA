@@ -26,7 +26,7 @@
 # (0) Basic Setting (for workstation)
 # read pre-defined settings
 info=$1
-.$1
+. $info
 #*** 0a. Set CaMa-Flood base directory
 #BASE=`pwd`/..
 ##BASE="/home/yi79a/yuta/CaMa-Flood_v395b_20191030"
@@ -38,7 +38,7 @@ export IFORTLIB="/share/pkg/intel/parallel_studio_xe_2018_u3ce/lib:/share/pkg/in
 export DYLD_LIBRARY_PATH="${IFORTLIB}:${DYLD_LIBRARY_PATH}"
 
 #*** 0c. OpenMP thread number
-export OMP_NUM_THREADS=20                          # OpenMP cpu num
+export OMP_NUM_THREADS=8                          # OpenMP cpu num
 
 #================================================
 # (1) Experiment setting
@@ -87,7 +87,7 @@ LSTOONLY=".TRUE."                          # .TRUE. for storage only restart (fo
 CRESTDIR="./"                               # output restart file directory
 CVNREST="restart"                           # output restart file prefix
 LRESTCDF=".FALSE."                          # .TRUE. to use netCDF restart file
-IFRQ_RST="0"                                # output restat frequency.
+IFRQ_RST="30"                                # output restat frequency.
                                             # [0]: only at last time, [1,2,3,...,24] hourly restart, [30]: monthly restart
 
 
@@ -193,7 +193,7 @@ IFRQ_OUT=24                                 # output frequency: [1,2,3,...,24] h
 LOUTCDF=".FALSE."                           # .TRUE. netCDF output, .FALSE. plain binary output
 COUTDIR="./"                                # output directory 
 #CVARSOUT="outflw,storge,fldfrc,maxdph,flddph" # list output variable (comma separated)
-CVARSOUT="rivsto,outflw,storge,fldfrc,flddph,outwth" # list output variable (comma separated)
+CVARSOUT="outflw,flddph,outwth" # list output variable (comma separated)
 #CVARSOUT="rivout,rivsto,rivdph,rivvel,fldout,fldsto,flddph,fldfrc,fldare,sfcelv,outflw,storge,pthflw,pthout,maxsto,maxflw,maxdph,outwth" # list output variable (comma separated)
 COUTTAG=""  # see (3) set each year         #   output tag $(COUTDIR)/$(VARNAME)$(OUTTAG).bin
 
@@ -264,8 +264,8 @@ do
 
   #*** 3c. update input / output file data
   CSYEAR=`printf %04d ${SYEAR}`
-  COUTTAG=${CSYEAR}                  # output file tag
-
+  ##COUTTAG=${CSYEAR}                  # output file tag
+  COUTTAG=""
   #CROFCDF="${CROFDIR}/${CROFPRE}${CSYEAR}.nc"  # input netCDF runoff file
   #SYEARIN=$IYR
   #SMONIN=1
