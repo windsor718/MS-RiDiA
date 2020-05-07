@@ -83,9 +83,28 @@ def gain_perturbation(var, outdir, mapdir, nlat, nlon, eTot,
         if not os.path.exists(bkupdir):
             os.makedirs(bkupdir)
         fn = "{0}.bin".format(var)
+        if e == 0:
+            # copy original map
+            subprocess.check_call(["cp", os.path.join(mapdir, "rivhgt.bin"),
+                                   os.path.join(bkupdir, "rivhgt.bin")])
+            subprocess.check_call(["cp", os.path.join(mapdir, "rivman.bin"),
+                                   os.path.join(bkupdir, "rivman.bin")])
+            subprocess.check_call(["cp", os.path.join(mapdir, "rivshp.bin"),
+                                   os.path.join(bkupdir, "rivshp.bin")])
+            subprocess.check_call(["cp", os.path.join(mapdir, "rivbta.bin"),
+                                   os.path.join(bkupdir, "rivbta.bin")])
+            subprocess.check_call(["cp", os.path.join(mapdir, "rivhgt.bin"),
+                                   os.path.join(paramdir, "rivhgt.bin")])
+            subprocess.check_call(["cp", os.path.join(mapdir, "rivman.bin"),
+                                   os.path.join(paramdir, "rivman.bin")])
+            subprocess.check_call(["cp", os.path.join(mapdir, "rivshp.bin"),
+                                   os.path.join(paramdir, "rivshp.bin")])
+            subprocess.check_call(["cp", os.path.join(mapdir, "rivbta.bin"),
+                                   os.path.join(paramdir, "rivbta.bin")])
+            continue
         if var == "rivhgt":
-            get_rivhgt2d(mapdir, paramdir, fn, nlat, nlon,
-                         hc_min=0.05, hc_max=0.5, hp_min=0.1, hp_max=0.7)
+            get_rivhgt2d(mapdir, bkupdir, paramdir, fn, nlat, nlon,
+                         hc_logmean=-2.3, hc_logstd=1.17, hp_min=0.3, hp_max=0.7)
         else:
             sf = outarray[e].flatten().astype(dtype_f)
             sf.tofile(os.path.join(paramdir, fn))
@@ -131,16 +150,18 @@ def get_map2d_from_lognormal(widths2d, widthMed,
     return outarray
 
 
-def get_rivhgt2d(mapdir, paramdir, fn, nlat, nlon,
-                 hc_min=0.05, hc_max=0.5, hp_min=0.1, hp_max=0.7):
+def get_rivhgt2d(mapdir, bkupdir, paramdir, fn, nlat, nlon,
+                 hc_logmean=-2.3, hc_logstd=-1.17, hp_min=0.4, hp_max=0.6):
     cnextxy = os.path.join(mapdir, "nextxy.bin")
     crivout = os.path.join(mapdir, "outclm.bin")
     crivhgt = os.path.join(paramdir, fn)
-    hc = np.random.uniform(hc_min, hc_max, 1)[0]
+    hc = np.random.lognormal(hc_logmean, hc_logstd, 1)[0]
     hp = np.random.uniform(hp_min, hp_max, 1)[0]
     subprocess.check_call(["/home/yi79a/yuta/RiDiA/srcda/MS-RiDiA/fsrc/calc_rivhgt", crivout, crivhgt,
                           cnextxy, str(hc), str(hp),
                           str(nlon), str(nlat)])
+    subprocess.check_call(["cp", os.path.join(paramdir, "rivhgt.bin"),
+                           os.path.join(bkupdir, "rivhgt.bin")])
 
 
 #@jit
@@ -254,14 +275,14 @@ def update_states(xa_each, outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat,
     crivshp = os.path.join(outdir, "param", "rivshp.bin")
     crivbta = os.path.join(outdir, "param", "rivbta.bin")
     cnextxy = os.path.join(mapdir, "nextxy.bin")
-    subprocess.check_call(["./fsrc/calc_rivbta", crivshp, crivbta, cnextxy, str(nlon), str(nlat)])
+    subprocess.check_call(["/home/yi79a/yuta/RiDiA/srcda/MS-RiDiA/fsrc/calc_rivbta", crivshp, crivbta, cnextxy, str(nlon), str(nlat)])
 
     # add noise to avoid convergence
     add_noise(xa_each, outdir, nlon, nlat, nt, map2vec,
               vec2lat, vec2lon, dtype_f)
 
     # rename files
-    for var in ["outflw.bin", "outwth.bin"]:
+    for var in ["outflw.bin", "outwth.bin", "flddph.bin"]:
         outname = "{0}_{1}.bin".format(var.split(".")[0],
                                        edate.strftime("%Y%m%d"))
         subprocess.check_call(["mv", os.path.join(outdir, var),
@@ -313,13 +334,11 @@ def rewrite_restart(outdir, mapdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon,
     # after assimilation file is saved
     rivshp = dau.load_data3d(os.path.join(outdir, "param/rivshp.bin"),
                              1, nlat, nlon, map2vec, nvec, dtype=np.float32)[0]
-    print(rivshp)
     outwth = dau.load_data3d(os.path.join(outdir, "outwth.bin"),
                              nt, nlat, nlon, map2vec, nvec, dtype=np.float32)[-1]
     storage = calc_storage.get_storage_invertsely(outwth, rivwth, rivlen, rivhgt,
                                                   rivshp, grarea, fldgrd, nvec,
                                                   nlfp=nlfp, undef=-9999)
-    print(storage)
     restart = np.zeros([2, nlat, nlon])
     restart[0] = dau.revert_map(storage[0].reshape(1, nvec),
                                 vec2lat, vec2lon, nlat, nlon)[0]
@@ -350,10 +369,13 @@ def save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f):
     nvec = len(vec2lat)
     # update outwth
     data = np.memmap(os.path.join(outdir, "outwth.bin"), dtype=dtype_f,
-                     shape=(nt, nlat, nlon), mode="w+")  # use carefully!
+                     shape=(nt, nlat, nlon), mode="r+")  # use carefully!
     tmp = dau.revert_map(xa_each[0, :].astype(dtype_f).reshape(1, nvec),
                          vec2lat, vec2lon, nlat, nlon)[0]
-    tmp = np.absolute(tmp)
+    undefloc = (tmp == 1e+20)
+    tmp[undefloc] = 1
+    tmp = np.exp(tmp)  # log
+    tmp[undefloc] = 1e+20
     data[-1, :, :] = tmp[:, :]
     del data  # closing and flushing changes to disk
 
@@ -361,8 +383,11 @@ def save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f):
                       shape=(nlat, nlon), mode="w+")  # use carefully!
     tmp = dau.revert_map(xa_each[1, :].astype(dtype_f).reshape(1, nvec),
                          vec2lat, vec2lon, nlat, nlon)[0]
-    tmp[tmp == 1e+20] = -9999
+    undefloc = (tmp == 1e+20)
+    tmp[undefloc] = 1  # just to avoid overflow
+    tmp = np.exp(tmp)
     tmp[tmp < 1] = 1
+    tmp[undefloc] = -9999
     data0[:, :] = tmp[:, :]
     del data0
 
@@ -370,26 +395,34 @@ def save_updates(xa_each, outdir, nlon, nlat, nt, vec2lat, vec2lon, dtype_f):
                       shape=(nlat, nlon), mode="w+")  # use carefully!
     tmp = dau.revert_map(xa_each[2, :].astype(dtype_f).reshape(1, nvec),
                          vec2lat, vec2lon, nlat, nlon)[0]
-    tmp[tmp == 1e+20] = -9999
+    undefloc = (tmp == 1e+20)
+    tmp[undefloc] = 1
+    tmp = np.exp(tmp)
     tmp[tmp < 0.01] = 0.01
+    tmp[undefloc] = -9999
     data1[:, :] = tmp[:, :]
     del data1
 
     data2 = np.memmap(os.path.join(outdir, "param/rivshp.bin"), dtype=dtype_f,
                       shape=(nlat, nlon), mode="w+")  # use carefully!
     tmp = dau.revert_map(xa_each[3, :].astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
-    tmp[tmp == 1e+20] = -9999
+    undefloc = (tmp == 1e+20)
+    tmp[undefloc] = 1
+    tmp = np.exp(tmp)
     tmp[tmp < 1] = 1
+    tmp[undefloc] = -9999
     data2[:, :] = tmp[:, :]
     del data2
 
 
-def multiply_normalnoise(vec, std, min, max):
+def multiply_normalnoise(vec, std, minv, maxv):
+    np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
     noise = np.random.normal(1, std, 1)
-    if noise < min:
-        noise = min
-    elif noise > max:
-        noise = max
+    if noise < minv:
+        noise = minv
+    elif noise > maxv:
+        noise = maxv
+    print(noise, (vec*noise).min(), (vec*noise).max())
     return vec*noise
 
 
@@ -399,30 +432,34 @@ def add_noise(xa_each, outdir, nlon, nlat, nt, map2vec, vec2lat, vec2lon, dtype_
     Tweaking needed.
     """
     nvec = len(vec2lat)
+    xa_each = np.exp(xa_each)  # its log; xa is vector, so there is no undef.
     data0 = np.memmap(os.path.join(outdir, "param/rivhgt.bin"), dtype=dtype_f,
-                      shape=(nlat, nlon), mode="w+")  # use carefully!
+                      shape=(nlat, nlon), mode="r+")  # use carefully!
     next0 = multiply_normalnoise(xa_each[1, :], 0.25, 0.5, 1.5)
     tmp = dau.revert_map(next0.astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
+    tmp[tmp < 0.5] = 0.5
     tmp[tmp == 1e+20] = -9999
-    tmp[tmp < 1] = 1
+    tmp[tmp > 20] = 20
     data0[:, :] = tmp[:, :]
     del data0
 
     data1 = np.memmap(os.path.join(outdir, "param/rivman.bin"), dtype=dtype_f,
-                      shape=(nlat, nlon), mode="w+")  # use carefully!
+                      shape=(nlat, nlon), mode="r+")  # use carefully!
     next1 = multiply_normalnoise(xa_each[2, :], 0.25, 0.5, 1.5)
     tmp = dau.revert_map(next1.astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
-    tmp[tmp == 1e+20] = -9999
     tmp[tmp < 0.01] = 0.01
+    tmp[tmp == 1e+20] = -9999
+    tmp[tmp > 5] = 5
     data1[:, :] = tmp[:, :]
     del data1
 
     data2 = np.memmap(os.path.join(outdir, "param/rivshp.bin"), dtype=dtype_f,
-                      shape=(nlat, nlon), mode="w+")  # use carefully!
+                      shape=(nlat, nlon), mode="r+")  # use carefully!
     next2 = multiply_normalnoise(xa_each[3, :], 0.25, 0.5, 1.5)
     tmp = dau.revert_map(next2.astype(dtype_f).reshape(1, nvec), vec2lat, vec2lon, nlat, nlon)[0]
-    tmp[tmp == 1e+20] = -9999
     tmp[tmp < 1] = 1
+    tmp[tmp == 1e+20] = -9999
+    tmp[tmp > 20] = 20
     data2[:, :] = tmp[:, :]
     del data2
 #

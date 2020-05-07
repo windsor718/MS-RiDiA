@@ -100,8 +100,10 @@ class AssimCama(object):
         self.eTot = int(varDict["eTot"])
         self.nCPUs = int(varDict["nCPUs"])
         self.statevars = varDict["statevars"]
+        self.statedist = varDict["statedist"]
         self.statetype = varDict["statetype"]  # prognostic/parameter
         self.obsnames = varDict["obsnames"]
+        self.obsdist = varDict["obsdist"]
         self.obsvars = varDict["obsvars"]  # 1 if available 0 if not.
         self.obsncpath = varDict["obsncpath"]
         self.assimconfig = varDict["assimconfig"]
@@ -177,15 +179,19 @@ class AssimCama(object):
             date, nT = self.driver(date, nT)
 
     def driver(self, date, obs_dset):
+        test0 = np.fromfile(os.path.join(self.outdir.format(1), "param/rivhgt.bin"), np.float32).reshape(self.nlat, self.nlon)
+        test1 = np.fromfile(os.path.join(self.outdir.format(2), "param/rivhgt.bin"), np.float32).reshape(self.nlat, self.nlon)
+        print("max", test0.max(), test1.max())
+        print((test0 - test1).sum(), (test0 - test1).max(), (test0 - test1).min())
         ndate, nT = self.forward(date,
                                  ensrnof=self.ensrnof, restart=True)
         adate = ndate - datetime.timedelta(seconds=86400)
         self.filtering(adate, nT, obs_dset)
-        if ndate.year > date.year:
-            self.backup_restart(ndate)
-            with open(os.path.join(self.outdir, "ntlog.txt"), "a") as f:
-                f.write("{0}, {1}"
-                        .format(ndate.strftime("%Y%m%d%H"), nT))
+        # if ndate.year > date.year:
+        #     self.backup_restart(ndate)
+        #     with open(os.path.join(self.outdir, "ntlog.txt"), "a") as f:
+        #         f.write("{0}, {1}"
+        #                 .format(ndate.strftime("%Y%m%d%H"), nT))
         return ndate, nT
     #
 
@@ -321,7 +327,7 @@ class AssimCama(object):
                 os.makedirs(resdir)
             respath = os.path.join(outdir, "restart.bin")
             datestring = date.strftime("%Y%m%d%H")
-            bpath = os.path.dir(resdir,
+            bpath = os.path.join(resdir,
                                 "restart_{0}.bin".format(datestring))
             subprocess.check_call(["cp", respath, bpath])
     #
@@ -415,7 +421,13 @@ class AssimCama(object):
                                          1, self.nlat, self.nlon,
                                          self.map2vec, self.nvec, dtype=np.float32
                                          )
-                buffer[idx, eNum, :, :] = d
+                if self.statedist[idx] == "log":
+                    d[d==0] = 1e-8  # replace zero
+                    buffer[idx, eNum, :, :] = np.log(d)
+                elif self.statedist[idx] == "norm":
+                    buffer[idx, eNum, :, :] = d
+                else:
+                    raise KeyError("undefined distribution: {0}".format(self.statedist[idx]))
         return buffer
 
     def const_obs(self, obsdset, date):
@@ -428,17 +440,30 @@ class AssimCama(object):
         """
         obs_values_all = []
         obs_errors_all = []
-        for obsname in self.obsnames:
+        for idx, obsname in enumerate(self.obsnames):
             vecids = obsdset[obsname].vecid.values
             obs = obsdset[obsname].sel(time=date,
                                    kind="values").values
             obsall = np.ones([self.nvec], np.float64)*self.undef
-            obsall[vecids] = obs
-            obs_values_all.append(obsall.reshape(1, -1))
             err = obsdset[obsname].sel(time=date,
                                    kind="errors").values
             errall = np.ones([self.nvec], np.float64)*self.undef
-            errall[vecids] = err
+            if self.obsdist[idx] == "log":
+                undefloc = (obs == self.undef)
+                obs[undefloc] = 1.  # temporaly assign positive value incalse undef is negative.
+                err[undefloc] = 1.
+                logobs = np.log(obs)
+                logerr = np.log(err)
+                logobs[undefloc] = self.undef
+                logerr[undefloc] = self.undef
+                obsall[vecids] = logobs
+                errall[vecids] = logerr
+            elif self.obsdist[idx] == "norm":
+                obsall[vecids] = obs
+                errall[vecids] = err
+            else:
+                raise KeyError("undefined distribution: {0}".format(self.obsdist[idx]))
+            obs_values_all.append(obsall.reshape(1, -1))
             obs_errors_all.append(errall.reshape(1, -1))
         obs_date_values = np.vstack(obs_values_all)
         obs_date_errors = np.vstack(obs_errors_all)
@@ -460,6 +485,9 @@ class AssimCama(object):
                                 chose this carefully-this should be
                                 your model byte precision.
         """
+        ens0 = xa[1, 1, -1, :]
+        ens1 = xa[1, 2, -1, :]
+        print((ens0-ens1).sum())
         argsmap = [[xa[:, eNum, -1, :], self.outdir.format(eNum), self.mapdir,
                    self.nlon, self.nlat, nT, self.map2vec, self.vec2lat,
                    self.vec2lon, eNum, self.nlfp, edate, dtype_f]

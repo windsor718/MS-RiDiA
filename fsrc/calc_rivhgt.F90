@@ -17,7 +17,7 @@ USE NETCDF
       data                    HC   /0.1/
       data                    HP   /0.5/
       data                    HO   /0.0/
-      data                    HMIN /1.0/
+      data                    HMIN /0.5/
 
 ! river network map parameters
       integer             ::  ix, iy

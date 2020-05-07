@@ -33,8 +33,8 @@ def get_storage_invertsely(my_type[:] outwth, my_type[:] rivwth,
         DTYPE = np.float32
     storage = np.zeros([2, nvec], dtype=DTYPE)
     cdef my_type [:, :] storage_view = storage
-    #for iv in prange(0, nvec, nogil=True):
-    for iv in range(0, nvec):
+    for iv in prange(0, nvec, nogil=True):
+    #for iv in range(0, nvec):
         if rivhgt[iv] == undef:
             continue
         if outwth[iv] < rivwth[iv]:
@@ -64,7 +64,6 @@ def get_storage_invertsely(my_type[:] outwth, my_type[:] rivwth,
             if layer == nlfp:
                 # flow is over cell, assimilation may not be good in this grid.
                 # leave it as it was or make it fldstomax.
-                print("flow exceeded grid")
                 continue
             else:
                 hflp = dphpre + (wflp-wthpre)*fldgrd[layer-1, iv]
@@ -73,7 +72,5 @@ def get_storage_invertsely(my_type[:] outwth, my_type[:] rivwth,
             Aflp = Atmp - wflw*hflp
 
         storage_view[0, iv] = rivlen[iv] * Ariv
-        if storage_view[0, iv] > 1e6:
-            print(iv, outwth[iv], rivwth[iv], hflw, rivhgt[iv], wflp, hflp, s)
         storage_view[1, iv] = rivlen[iv] * Aflp
     return storage

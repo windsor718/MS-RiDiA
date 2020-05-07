@@ -38,7 +38,7 @@ export IFORTLIB="/share/pkg/intel/parallel_studio_xe_2018_u3ce/lib:/share/pkg/in
 export DYLD_LIBRARY_PATH="${IFORTLIB}:${DYLD_LIBRARY_PATH}"
 
 #*** 0c. OpenMP thread number
-export OMP_NUM_THREADS=8                          # OpenMP cpu num
+export OMP_NUM_THREADS=20                          # OpenMP cpu num
 
 #================================================
 # (1) Experiment setting
@@ -87,7 +87,7 @@ LSTOONLY=".TRUE."                          # .TRUE. for storage only restart (fo
 CRESTDIR="./"                               # output restart file directory
 CVNREST="restart"                           # output restart file prefix
 LRESTCDF=".FALSE."                          # .TRUE. to use netCDF restart file
-IFRQ_RST="30"                                # output restat frequency.
+IFRQ_RST="0"                                # output restat frequency.
                                             # [0]: only at last time, [1,2,3,...,24] hourly restart, [30]: monthly restart
 
 
